@@ -24,29 +24,42 @@ class _ConnectPcModalState extends State<ConnectPcModal>
     with SingleTickerProviderStateMixin {
   int _selectedOsIndex = 0; // 0: Linux, 1: Windows, 2: macOS
   int _selectedTransportIndex = 0; // 0: USB, 1: Wi-Fi, 2: Bluetooth
+  bool _autoSetupAdb = false;
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
 
   late ConnectionService _connectionService;
 
-  final List<Map<String, String>> _osCommands = [
+  List<Map<String, String>> get _osCommands => [
     {
       'os': 'Linux',
       'icon': '🐧',
-      'desc': 'Downloads companion & installs auto-start systemd service (zero files needed!).',
-      'cmd': 'curl -sSL https://raw.githubusercontent.com/Mystery3589/astradeck/main/server/setup.sh | bash',
+      'desc': _autoSetupAdb
+          ? 'Downloads companion, auto-configures ADB reverse tunnel, & installs systemd service.'
+          : 'Downloads companion & installs auto-start systemd service (Zero ADB / No Developer Options needed!).',
+      'cmd': _autoSetupAdb
+          ? 'curl -sSL https://raw.githubusercontent.com/Mystery3589/astradeck/main/server/setup.sh | bash -s -- --adb'
+          : 'curl -sSL https://raw.githubusercontent.com/Mystery3589/astradeck/main/server/setup.sh | bash',
     },
     {
       'os': 'Windows',
       'icon': '🪟',
-      'desc': 'Paste in PowerShell: downloads companion & configures silent auto-start.',
-      'cmd': 'irm https://raw.githubusercontent.com/Mystery3589/astradeck/main/server/setup.ps1 | iex',
+      'desc': _autoSetupAdb
+          ? 'Paste in PowerShell: auto-installs ADB, companion, & configures silent auto-start.'
+          : 'Paste in PowerShell: downloads companion & configures silent auto-start (No ADB needed).',
+      'cmd': _autoSetupAdb
+          ? r'$env:ASTRADECK_ADB=1; irm https://raw.githubusercontent.com/Mystery3589/astradeck/main/server/setup.ps1 | iex'
+          : 'irm https://raw.githubusercontent.com/Mystery3589/astradeck/main/server/setup.ps1 | iex',
     },
     {
       'os': 'macOS',
       'icon': '🍏',
-      'desc': 'Downloads companion & installs auto-start LaunchAgent.',
-      'cmd': 'curl -sSL https://raw.githubusercontent.com/Mystery3589/astradeck/main/server/setup.sh | bash',
+      'desc': _autoSetupAdb
+          ? 'Downloads companion, auto-configures ADB reverse tunnel, & installs LaunchAgent.'
+          : 'Downloads companion & installs auto-start LaunchAgent (No ADB needed).',
+      'cmd': _autoSetupAdb
+          ? 'curl -sSL https://raw.githubusercontent.com/Mystery3589/astradeck/main/server/setup.sh | bash -s -- --adb'
+          : 'curl -sSL https://raw.githubusercontent.com/Mystery3589/astradeck/main/server/setup.sh | bash',
     },
   ];
 
@@ -222,16 +235,66 @@ class _ConnectPcModalState extends State<ConnectPcModal>
                   Expanded(
                     child: Text(
                       _selectedTransportIndex == 0
-                          ? 'USB: Lowest latency (<2ms). Probing ports 8765-8780.'
+                          ? 'USB: Sub-1ms latency. USB Tethering works with zero developer options!'
                           : _selectedTransportIndex == 1
-                              ? 'Wi-Fi: Ensure phone and PC are on the same local network.'
-                              : 'Bluetooth: Pair phone with PC in Bluetooth settings for zero-router link.',
+                              ? 'Wi-Fi / LAN: Zero-cable, 3-8ms. Auto-discovers companion on local network.'
+                              : 'Bluetooth: Zero-router, 12-25ms. Pair phone with PC in Bluetooth settings.',
                       style: const TextStyle(fontSize: 11, color: Color(0xFFCBD5E1)),
                     ),
                   ),
                 ],
               ),
             ),
+
+            if (_selectedTransportIndex == 0) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F172A),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: accent.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.cable, color: accent, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            'USB Tethering (Zero Developer Options)',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'Plug USB cable & turn on USB Tethering for instant sub-1ms speed.',
+                            style: TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: accent,
+                        side: BorderSide(color: accent),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      onPressed: () => connectionService.openTetheringSettings(),
+                      child: const Text('Open Settings', style: TextStyle(fontSize: 11)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
 
             const SizedBox(height: 18),
             const Text(
@@ -279,6 +342,64 @@ class _ConnectPcModalState extends State<ConnectPcModal>
                     ),
                   );
                 }),
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            // Auto-setup ADB Switch Card (Secondary / Developer Option)
+            Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F172A),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _autoSetupAdb ? accent.withValues(alpha: 0.6) : const Color(0xFF334155),
+                  width: _autoSetupAdb ? 1.5 : 1,
+                ),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: (_autoSetupAdb ? accent : const Color(0xFF64748B)).withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.developer_mode,
+                      size: 16,
+                      color: _autoSetupAdb ? accent : const Color(0xFF94A3B8),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'ADB Reverse Tunnel (Developer Mode)',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        Text(
+                          _autoSetupAdb
+                              ? 'Command installs Google ADB platform-tools on PC (requires USB Debugging on phone)'
+                              : 'Without ADB: Uses USB Tethering or Wi-Fi (Plug & play, zero developer options)',
+                          style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch(
+                    value: _autoSetupAdb,
+                    activeThumbColor: accent,
+                    onChanged: (val) => setState(() => _autoSetupAdb = val),
+                  ),
+                ],
               ),
             ),
 
@@ -369,7 +490,11 @@ class _ConnectPcModalState extends State<ConnectPcModal>
     final isSelected = _selectedTransportIndex == index;
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => _selectedTransportIndex = index),
+        onTap: () {
+          setState(() {
+            _selectedTransportIndex = index;
+          });
+        },
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(

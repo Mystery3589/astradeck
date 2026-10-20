@@ -187,6 +187,26 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler, EventCh
             "isConnected" -> {
                 result.success(isSocketConnected)
             }
+            "openTetheringSettings" -> {
+                try {
+                    val intent = Intent().apply {
+                        action = "android.settings.TETHER_SETTINGS"
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    startActivity(intent)
+                    result.success(true)
+                } catch (e: Exception) {
+                    try {
+                        val fallback = Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        startActivity(fallback)
+                        result.success(true)
+                    } catch (e2: Exception) {
+                        result.error("INTENT_ERROR", e2.message, null)
+                    }
+                }
+            }
             else -> result.notImplemented()
         }
     }

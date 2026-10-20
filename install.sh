@@ -14,9 +14,37 @@ echo "          AstraDeck Mobile Installer              "
 echo "=================================================="
 
 # Check for adb
+PLATFORM_TOOLS_DIR="$HOME/.astradeck/platform-tools"
+if [ -x "$PLATFORM_TOOLS_DIR/adb" ]; then
+    export PATH="$PLATFORM_TOOLS_DIR:$PATH"
+fi
+
 if ! command -v adb &> /dev/null; then
-    echo "[-] Error: 'adb' command not found. Ensure Android SDK platform-tools are in your PATH."
-    exit 1
+    echo "[*] 'adb' command not found. Auto-installing Google platform-tools..."
+    mkdir -p "$PLATFORM_TOOLS_DIR"
+    python3 -c "
+import urllib.request, zipfile, io, os, sys
+url = 'https://dl.google.com/android/repository/platform-tools-latest-linux.zip'
+dest = os.path.expanduser('~/.astradeck')
+req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+try:
+    with urllib.request.urlopen(req) as resp:
+        data = resp.read()
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        z.extractall(dest)
+    p = os.path.join(dest, 'platform-tools', 'adb')
+    if os.path.exists(p):
+        os.chmod(p, 0o755)
+        print('[+] ADB installed to ' + p)
+except Exception as e:
+    print('[-] Failed to auto-install ADB:', e)
+"
+    if [ -x "$PLATFORM_TOOLS_DIR/adb" ]; then
+        export PATH="$PLATFORM_TOOLS_DIR:$PATH"
+    else
+        echo "[-] Error: 'adb' command not found. Ensure Android SDK platform-tools are in your PATH."
+        exit 1
+    fi
 fi
 
 # Check for connected devices

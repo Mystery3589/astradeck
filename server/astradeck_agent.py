@@ -103,19 +103,41 @@ class AstraDeckServer:
         return ips
 
     # --- Automatic ADB Reverse Watchdog ---
+    def get_adb_binary(self) -> Optional[str]:
+        adb = shutil.which("adb")
+        if adb:
+            return adb
+        candidates = [
+            os.path.expanduser("~/.astradeck/platform-tools/adb"),
+            os.path.expanduser("~/.astradeck/platform-tools/adb.exe"),
+            os.path.expanduser("~/.local/bin/adb"),
+        ]
+        for c in candidates:
+            if os.path.isfile(c) and (os.access(c, os.X_OK) or os.name == "nt"):
+                return c
+        return None
+
     async def run_adb_reverse_watchdog(self):
         """Continuously ensures 'adb reverse tcp:PORT tcp:PORT' is active whenever a phone is connected."""
-        if not shutil.which("adb"):
-            print("[ADB Watchdog] adb executable not found. Automatic reverse tunnel disabled.")
-            return
-
-        print(f"[ADB Watchdog] Active: automatically tunneling tcp:{self.active_port} whenever phone is plugged in.")
         last_had_device = False
+        notified_missing = False
 
         while True:
+            adb_bin = self.get_adb_binary()
+            if not adb_bin:
+                if not notified_missing:
+                    print("[ADB Watchdog] adb executable not found. Waiting for ADB installation...")
+                    notified_missing = True
+                await asyncio.sleep(5)
+                continue
+
+            if notified_missing:
+                print(f"[ADB Watchdog] Detected newly installed ADB at {adb_bin}!")
+                notified_missing = False
+
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    "adb", "devices",
+                    adb_bin, "devices",
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE
                 )
@@ -127,7 +149,7 @@ class AstraDeckServer:
                     if not last_had_device:
                         print(f"[ADB Watchdog] Phone detected! Setting up reverse tunnel for port {self.active_port}...")
                     rev = await asyncio.create_subprocess_exec(
-                        "adb", "reverse", f"tcp:{self.active_port}", f"tcp:{self.active_port}",
+                        adb_bin, "reverse", f"tcp:{self.active_port}", f"tcp:{self.active_port}",
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE
                     )

@@ -1,13 +1,17 @@
-# ==============================================================================
-# AstraDeck Universal 1-Click Desktop Companion Setup (Windows PowerShell)
-# Run via:
-#   irm https://raw.githubusercontent.com/<user>/<repo>/main/server/setup.ps1 | iex
-# ==============================================================================
+param (
+    [switch]$Adb = $false
+)
+
+if ($env:ASTRADECK_ADB -eq "1" -or $env:SETUP_ADB -eq "1") {
+    $Adb = $true
+}
 
 $Repo = if ($env:ASTRADECK_REPO) { $env:ASTRADECK_REPO } else { "Mystery3589/astradeck" }
 $Branch = if ($env:ASTRADECK_BRANCH) { $env:ASTRADECK_BRANCH } else { "main" }
 $RawBase = "https://raw.githubusercontent.com/$Repo/$Branch/server"
 $InstallDir = "$env:USERPROFILE\.astradeck\server"
+$PlatformToolsDir = "$env:USERPROFILE\.astradeck\platform-tools"
+$AdbExe = "$PlatformToolsDir\adb.exe"
 
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host "       AstraDeck 1-Click Desktop Companion Setup (Windows)  " -ForegroundColor Cyan
@@ -26,12 +30,77 @@ python -m pip install websockets psutil --quiet
 
 # 3. Create install directory
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.astradeck" | Out-Null
 
 # 4. Download companion files
 Write-Host "[*] Downloading companion agent files..." -ForegroundColor Yellow
 Invoke-RestMethod -Uri "$RawBase/astradeck_agent.py" -OutFile "$InstallDir\astradeck_agent.py"
 Invoke-RestMethod -Uri "$RawBase/app_lifecycle.py" -OutFile "$InstallDir\app_lifecycle.py"
 Invoke-RestMethod -Uri "$RawBase/system_controls.py" -OutFile "$InstallDir\system_controls.py"
+
+# --- Android Debug Bridge (ADB) Auto-Setup ---
+function Setup-Adb {
+    Write-Host "============================================================" -ForegroundColor Cyan
+    Write-Host "          Android Debug Bridge (ADB) Auto-Setup             " -ForegroundColor Cyan
+    Write-Host "============================================================" -ForegroundColor Cyan
+
+    $ExistingAdb = Get-Command adb -ErrorAction SilentlyContinue
+    if ($ExistingAdb) {
+        Write-Host "[+] System ADB detected: $($ExistingAdb.Source)" -ForegroundColor Green
+        & adb start-server 2>$null
+        return
+    }
+
+    if (Test-Path $AdbExe) {
+        Write-Host "[+] Local AstraDeck ADB found at $AdbExe" -ForegroundColor Green
+        $env:Path += ";$PlatformToolsDir"
+        & $AdbExe start-server 2>$null
+        return
+    }
+
+    Write-Host "[*] Downloading official Google platform-tools for Windows (~12MB)..." -ForegroundColor Yellow
+    $ZipPath = "$env:USERPROFILE\.astradeck\platform-tools.zip"
+    $Url = "https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
+
+    try {
+        Invoke-WebRequest -Uri $Url -OutFile $ZipPath -UseBasicParsing
+        Write-Host "[*] Extracting platform-tools..." -ForegroundColor Yellow
+        Expand-Archive -Path $ZipPath -DestinationPath "$env:USERPROFILE\.astradeck" -Force
+        Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
+
+        # Add to User PATH
+        $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+        if ($UserPath -notlike "*$PlatformToolsDir*") {
+            [Environment]::SetEnvironmentVariable("Path", "$UserPath;$PlatformToolsDir", "User")
+        }
+        $env:Path += ";$PlatformToolsDir"
+
+        Write-Host "[+] ADB installed successfully at $AdbExe" -ForegroundColor Green
+        & $AdbExe start-server 2>$null
+    } catch {
+        Write-Host "[-] Failed to download/extract ADB: $_" -ForegroundColor Red
+    }
+}
+
+$ExistingAdb = Get-Command adb -ErrorAction SilentlyContinue
+if (-not $ExistingAdb -and -not (Test-Path $AdbExe)) {
+    if ($Adb) {
+        Setup-Adb
+    } else {
+        Write-Host ""
+        Write-Host "[?] ADB (Android Debug Bridge) is not installed." -ForegroundColor Yellow
+        Write-Host "    Auto-setting up ADB enables 1-click zero-latency USB" -ForegroundColor Yellow
+        Write-Host "    connection with your phone (no manual config needed)." -ForegroundColor Yellow
+        $Ans = Read-Host "[?] Would you like to auto-install ADB now? (Y/n)"
+        if ($Ans -eq "" -or $Ans -match "^[yY]") {
+            Setup-Adb
+        } else {
+            Write-Host "[*] Skipping ADB setup. (Enable anytime with -Adb or `$env:ASTRADECK_ADB=1)" -ForegroundColor DarkGray
+        }
+    }
+} else {
+    Write-Host "[+] ADB is available and configured." -ForegroundColor Green
+}
 
 # 5. Configure silent auto-start in Windows Startup folder
 $StartupFolder = [System.Environment]::GetFolderPath('Startup')
@@ -49,9 +118,9 @@ Write-Host "[*] Starting AstraDeck in background..." -ForegroundColor Green
 wscript.exe "$VbsPath"
 
 # 7. Check for connected Android device via ADB
-$Adb = Get-Command adb -ErrorAction SilentlyContinue
-if ($Adb) {
-    adb reverse tcp:8765 tcp:8765 2>$null
+$AdbCmd = if (Get-Command adb -ErrorAction SilentlyContinue) { "adb" } elseif (Test-Path $AdbExe) { $AdbExe } else { $null }
+if ($AdbCmd) {
+    & $AdbCmd reverse tcp:8765 tcp:8765 2>$null
     Write-Host "[+] ADB reverse tunnel configured on port 8765." -ForegroundColor Green
 }
 

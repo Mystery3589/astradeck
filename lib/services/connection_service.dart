@@ -10,7 +10,7 @@ import 'storage_service.dart';
 
 DesktopDevice _makeUsbLocalhost({int port = 8765}) => DesktopDevice(
       id: 'usb_localhost',
-      name: 'This PC (USB Cable)',
+      name: 'This PC (ADB Reverse)',
       operatingSystem: 'Desktop',
       osVersion: '',
       agentVersion: '2.5.0',
@@ -19,6 +19,19 @@ DesktopDevice _makeUsbLocalhost({int port = 8765}) => DesktopDevice(
       transport: ConnectionTransport.usb,
       isTrusted: false,
       hostname: 'localhost via adb reverse',
+    );
+
+DesktopDevice _makeUsbTether({String ip = '192.168.42.1', int port = 8765}) => DesktopDevice(
+      id: 'usb_tether',
+      name: 'This PC (USB Tethering)',
+      operatingSystem: 'Desktop',
+      osVersion: '',
+      agentVersion: '2.5.0',
+      ipAddress: ip,
+      port: port,
+      transport: ConnectionTransport.usb,
+      isTrusted: false,
+      hostname: 'PC via USB Tethering (<1ms)',
     );
 
 class ConnectionService extends ChangeNotifier {
@@ -91,13 +104,15 @@ class ConnectionService extends ChangeNotifier {
 
   bool get isUsbConnecting => _isUsbConnecting;
   bool get isUsbConnected =>
-      _devices.any((d) => d.id == 'usb_localhost' && d.status == ConnectionStatus.connected);
+      _devices.any((d) =>
+          (d.id == 'usb_localhost' || d.id == 'usb_tether') &&
+          d.status == ConnectionStatus.connected);
   String get usbDeviceDetails => _usbDeviceDetails;
 
   void _loadInitial() {
     _devices = _storage.loadDevices();
-    // Prune any legacy transient usb_localhost entries from disk
-    _devices.removeWhere((d) => d.id == 'usb_localhost');
+    // Prune any legacy transient usb entries from disk
+    _devices.removeWhere((d) => d.id == 'usb_localhost' || d.id == 'usb_tether');
     _savePersistentDevices();
 
     final preferred = _devices.where((d) => d.isPreferred).firstOrNull;
@@ -119,12 +134,63 @@ class ConnectionService extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------------------
-  // Dynamic Port Prober
+  // Android USB Tethering & ADB Probers
   // ---------------------------------------------------------------------------
 
+  /// Opens Android's native Tethering Settings screen directly so the user
+  /// can toggle "USB Tethering" with 1 tap (No Developer Options required).
+  Future<void> openTetheringSettings() async {
+    try {
+      await _btMethod.invokeMethod('openTetheringSettings');
+    } catch (e) {
+      debugPrint('Error launching tethering settings: $e');
+    }
+  }
+
+  /// Discovers the PC companion over a direct USB Tethering network interface (Without ADB).
+  /// Inspects candidate gateways (192.168.42.1, 192.168.43.1, etc.) and active interfaces.
+  Future<({String ip, int port})?> findUsbTetherGateway() async {
+    final candidateIps = <String>{
+      '192.168.42.1',  // Android RNDIS default
+      '192.168.43.1',  // Android alternative
+      '192.168.44.1',
+      '10.42.0.1',     // Linux NetworkManager USB tether
+      '192.168.137.1', // Windows ICS default
+    };
+
+    try {
+      final interfaces = await NetworkInterface.list(
+        includeLoopback: false,
+        type: InternetAddressType.IPv4,
+      );
+      for (final iface in interfaces) {
+        for (final addr in iface.addresses) {
+          final ip = addr.address;
+          final parts = ip.split('.');
+          if (parts.length == 4) {
+            candidateIps.add('${parts[0]}.${parts[1]}.${parts[2]}.1');
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Interface inspection for USB Tethering: $e');
+    }
+
+    // Probe candidate host IPs on ports 8765-8775
+    for (final hostIp in candidateIps) {
+      for (int port = 8765; port <= 8775; port++) {
+        if (await _tcpProbe(hostIp, port, timeout: 140)) {
+          return (ip: hostIp, port: port);
+        }
+      }
+    }
+    return null;
+  }
+
+  /// Probes ADB reverse tunnel on localhost (127.0.0.1) across dynamic ports.
   Future<int?> findOpenUsbPort() async {
     for (int port = 8765; port <= 8780; port++) {
-      if (await _tcpProbe('127.0.0.1', port, timeout: 200)) {
+      if (await _tcpProbe('127.0.0.1', port, timeout: 180)) {
         return port;
       }
     }
@@ -132,13 +198,27 @@ class ConnectionService extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------------------
-  // Multi-Transport Auto-Connect
+  // Multi-Transport Auto-Connect (USB Tethering First -> ADB -> Wi-Fi)
   // ---------------------------------------------------------------------------
 
   Future<bool> autoConnect() async {
     if (isConnected) return true;
 
-    // 1. Probe USB localhost across dynamic port range 8765-8780
+    // 1. Probe USB Tethering gateway (PRIMARY - Zero Developer Options, <1ms)
+    final tether = await findUsbTetherGateway();
+    if (tether != null) {
+      final tetherIndex = _devices.indexWhere((d) => d.id == 'usb_tether');
+      if (tetherIndex != -1) {
+        _devices[tetherIndex].ipAddress = tether.ip;
+        _devices[tetherIndex].port = tether.port;
+      } else {
+        _devices.insert(0, _makeUsbTether(ip: tether.ip, port: tether.port));
+      }
+      final tetherDevice = _devices.firstWhere((d) => d.id == 'usb_tether');
+      return await connectTo(tetherDevice, pin: tetherDevice.authToken != null ? null : '1234');
+    }
+
+    // 2. Probe USB localhost across dynamic port range via ADB reverse
     final usbPort = await findOpenUsbPort();
     if (usbPort != null) {
       final usbIndex = _devices.indexWhere((d) => d.id == 'usb_localhost');
@@ -151,18 +231,18 @@ class ConnectionService extends ChangeNotifier {
       return await connectTo(usbDevice, pin: usbDevice.authToken != null ? null : '1234');
     }
 
-    // 2. Probe preferred device
+    // 3. Probe preferred device (Wi-Fi or Bluetooth)
     final preferred =
-        _devices.where((d) => d.isPreferred && d.id != 'usb_localhost').firstOrNull;
+        _devices.where((d) => d.isPreferred && d.id != 'usb_localhost' && d.id != 'usb_tether').firstOrNull;
     if (preferred != null) {
-      if (await _tcpProbe(preferred.ipAddress, preferred.port, timeout: 600)) {
+      if (await _tcpProbe(preferred.ipAddress, preferred.port, timeout: 500)) {
         return await connectTo(preferred, pin: preferred.authToken != null ? null : '1234');
       }
     }
 
-    // 3. Probe any trusted device
-    for (final dev in _devices.where((d) => d.isTrusted && d.id != 'usb_localhost')) {
-      if (await _tcpProbe(dev.ipAddress, dev.port, timeout: 400)) {
+    // 4. Probe any trusted device
+    for (final dev in _devices.where((d) => d.isTrusted && d.id != 'usb_localhost' && d.id != 'usb_tether')) {
+      if (await _tcpProbe(dev.ipAddress, dev.port, timeout: 350)) {
         return await connectTo(dev, pin: dev.authToken != null ? null : '1234');
       }
     }
@@ -202,45 +282,99 @@ class ConnectionService extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------------------
-  // USB Check / Connect Action
+  // USB Check / Connect Action (Supports Both Tethering and ADB)
   // ---------------------------------------------------------------------------
 
-  Future<void> checkUsbStatus() async {
+  Future<void> checkUsbStatus({bool preferAdb = false}) async {
     _isUsbConnecting = true;
     _lastError = null;
-    _usbDeviceDetails = 'Probing 127.0.0.1 (ports 8765-8780)...';
+    _usbDeviceDetails = preferAdb
+        ? 'Probing ADB reverse on 127.0.0.1...'
+        : 'Probing USB Tethering (No ADB needed)...';
     notifyListeners();
 
-    final foundPort = await findOpenUsbPort();
+    // 1. If not preferAdb: Check USB Tethering FIRST (Zero Developer Options / Consumer mode)
+    if (!preferAdb) {
+      final tether = await findUsbTetherGateway();
+      if (tether != null) {
+        final tetherIndex = _devices.indexWhere((d) => d.id == 'usb_tether');
+        if (tetherIndex != -1) {
+          _devices[tetherIndex].ipAddress = tether.ip;
+          _devices[tetherIndex].port = tether.port;
+        } else {
+          _devices.insert(0, _makeUsbTether(ip: tether.ip, port: tether.port));
+        }
+        final tetherDevice = _devices.firstWhere((d) => d.id == 'usb_tether');
+        _usbDeviceDetails = 'Found PC on USB Tether (${tether.ip}:${tether.port}) — connecting...';
+        notifyListeners();
 
-    if (foundPort == null) {
+        final ok = await connectTo(tetherDevice, pin: '1234');
+        _isUsbConnecting = false;
+        if (ok) {
+          _usbDeviceDetails = 'Connected via USB Tethering (<1ms, ${tether.ip}:${tether.port})';
+        } else {
+          _usbDeviceDetails = 'Connected to USB gateway but handshake failed.';
+        }
+        notifyListeners();
+        return;
+      }
+    }
+
+    // 2. Check ADB reverse localhost (127.0.0.1)
+    final foundPort = await findOpenUsbPort();
+    if (foundPort != null) {
+      final usbIndex = _devices.indexWhere((d) => d.id == 'usb_localhost');
+      if (usbIndex != -1) {
+        _devices[usbIndex].port = foundPort;
+      } else {
+        _devices.insert(0, _makeUsbLocalhost(port: foundPort));
+      }
+      final usbDevice = _devices.firstWhere((d) => d.id == 'usb_localhost');
+      _usbDeviceDetails = 'Server active via ADB on port $foundPort — connecting...';
+      notifyListeners();
+
+      final ok = await connectTo(usbDevice, pin: '1234');
       _isUsbConnecting = false;
-      _usbDeviceDetails =
-          'No AstraDeck server listening on 127.0.0.1.\n\nRun on PC:\n  ./server/setup.sh';
-      _lastError =
-          'USB companion not detected. Run 1-click setup on PC to start it.';
+      if (ok) {
+        _usbDeviceDetails = 'Connected via USB ADB reverse (Port $foundPort)';
+      } else {
+        _usbDeviceDetails = 'Connection failed. Ensure server is active.';
+      }
       notifyListeners();
       return;
     }
 
-    final usbIndex = _devices.indexWhere((d) => d.id == 'usb_localhost');
-    if (usbIndex != -1) {
-      _devices[usbIndex].port = foundPort;
-    } else {
-      _devices.insert(0, _makeUsbLocalhost(port: foundPort));
+    // 3. Fallback: If preferAdb was true, also try tethering as a last resort
+    if (preferAdb) {
+      final tether = await findUsbTetherGateway();
+      if (tether != null) {
+        final tetherIndex = _devices.indexWhere((d) => d.id == 'usb_tether');
+        if (tetherIndex != -1) {
+          _devices[tetherIndex].ipAddress = tether.ip;
+          _devices[tetherIndex].port = tether.port;
+        } else {
+          _devices.insert(0, _makeUsbTether(ip: tether.ip, port: tether.port));
+        }
+        final tetherDevice = _devices.firstWhere((d) => d.id == 'usb_tether');
+        _usbDeviceDetails = 'Found PC on USB Tether (${tether.ip}:${tether.port}) — connecting...';
+        notifyListeners();
+        final ok = await connectTo(tetherDevice, pin: '1234');
+        _isUsbConnecting = false;
+        if (ok) {
+          _usbDeviceDetails = 'Connected via USB Tethering (${tether.ip}:${tether.port})';
+        }
+        notifyListeners();
+        return;
+      }
     }
-    final usbDevice = _devices.firstWhere((d) => d.id == 'usb_localhost');
 
-    _usbDeviceDetails = 'Server active on port $foundPort — connecting...';
-    notifyListeners();
-
-    final ok = await connectTo(usbDevice, pin: '1234');
     _isUsbConnecting = false;
-    if (ok) {
-      _usbDeviceDetails = 'Connected via USB (Port $foundPort)';
-    } else {
-      _usbDeviceDetails = 'Connection failed. Ensure server is active.';
-    }
+    _usbDeviceDetails = preferAdb
+        ? 'No ADB reverse tunnel active on 127.0.0.1.\n\nRun on PC:\n  adb reverse tcp:8765 tcp:8765'
+        : 'USB not detected.\n\n1. Plug in USB cable\n2. Turn ON "USB Tethering" in Settings (tap button below)\n3. Or run 1-click PC setup.';
+    _lastError = preferAdb
+        ? 'ADB reverse not detected.'
+        : 'USB Tethering not detected. Turn on USB Tethering in Settings.';
     notifyListeners();
   }
 

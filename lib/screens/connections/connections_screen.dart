@@ -718,16 +718,15 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
 
   // --- 3. USB Mode Tab ---
   Widget _buildUsbTab(BuildContext context, ConnectionService service, SettingsService settings) {
-    final usbDevice = service.devices.where((d) => d.id == 'usb_localhost').firstOrNull;
+    final usbDevice = service.devices.where((d) => d.id == 'usb_tether' || d.id == 'usb_localhost').firstOrNull;
     final isConnected = usbDevice?.status == ConnectionStatus.connected;
-    final isConnecting = usbDevice?.status == ConnectionStatus.connecting ||
-        service.isUsbConnecting;
+    final isConnecting = usbDevice?.status == ConnectionStatus.connecting || service.isUsbConnecting;
 
     Color statusColor;
     String statusLabel;
     if (isConnected) {
       statusColor = const Color(0xFF10B981);
-      statusLabel = 'Connected';
+      statusLabel = usbDevice?.id == 'usb_tether' ? 'USB Tethering Active' : 'ADB Reverse Active';
     } else if (isConnecting) {
       statusColor = Colors.amber;
       statusLabel = 'Connecting...';
@@ -739,6 +738,7 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // 1. Primary USB Mode: USB Tethering (No ADB / No Developer Options)
         Card(
           color: const Color(0xFF1E293B),
           shape: RoundedRectangleBorder(
@@ -757,9 +757,12 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
                   children: [
                     const Icon(Icons.usb, color: Colors.tealAccent),
                     const SizedBox(width: 8),
-                    const Text('USB Direct Tethering (ADB)',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                    const Spacer(),
+                    const Expanded(
+                      child: Text(
+                        'USB Cable (Plug & Play)',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                    ),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
@@ -773,15 +776,14 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 const Text(
-                  'Ultra low latency (<2ms) via ADB reverse tunnel. '
-                  'Eliminates Wi-Fi interference completely.',
+                  'No Developer Options or ADB required! Plug in USB cable, turn on USB Tethering, and connect with sub-1ms physical latency.',
                   style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
 
-                // Status / instructions box
+                // Status & details box
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
@@ -811,17 +813,17 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
                       const Icon(Icons.network_ping, color: Color(0xFF10B981), size: 14),
                       const SizedBox(width: 4),
                       Text(
-                        'Latency: ${usbDevice.latencyMs} ms',
-                        style: const TextStyle(color: Color(0xFF10B981), fontSize: 12),
+                        'Latency: ${usbDevice.latencyMs} ms (<1ms Physical USB)',
+                        style: const TextStyle(color: Color(0xFF10B981), fontSize: 12, fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
                 ],
 
                 const SizedBox(height: 16),
-                Row(
-                  children: [
-                    if (isConnected)
+                if (isConnected)
+                  Row(
+                    children: [
                       Expanded(
                         child: OutlinedButton.icon(
                           style: OutlinedButton.styleFrom(
@@ -832,27 +834,7 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
                           icon: const Icon(Icons.link_off, size: 16),
                           label: const Text('Disconnect USB'),
                         ),
-                      )
-                    else
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: settings.settings.accentColor,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                          ),
-                          onPressed: isConnecting ? null : () => service.checkUsbStatus(),
-                          icon: isConnecting
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                                )
-                              : const Icon(Icons.usb),
-                          label: Text(isConnecting ? 'Connecting...' : 'Connect via USB'),
-                        ),
                       ),
-                    if (isConnected) ...[
                       const SizedBox(width: 8),
                       OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
@@ -864,7 +846,7 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
                             final lat = await service.testConnection(usbDevice);
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('USB ping: ${lat}ms')),
+                                SnackBar(content: Text('USB Round-Trip: ${lat}ms')),
                               );
                             }
                           }
@@ -873,16 +855,98 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
                         label: const Text('Ping'),
                       ),
                     ],
-                  ],
-                ),
+                  )
+                else
+                  Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.tealAccent,
+                                side: const BorderSide(color: Colors.tealAccent),
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                              ),
+                              onPressed: () => service.openTetheringSettings(),
+                              icon: const Icon(Icons.settings, size: 16),
+                              label: const Text('Open Tethering Settings'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: settings.settings.accentColor,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                              ),
+                              onPressed: isConnecting ? null : () => service.checkUsbStatus(preferAdb: false),
+                              icon: isConnecting
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                    )
+                                  : const Icon(Icons.bolt, size: 16),
+                              label: Text(isConnecting ? 'Connecting...' : 'Connect (No ADB)'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
               ],
             ),
           ),
         ),
 
+        const SizedBox(height: 14),
+
+        // 2. Secondary Developer Option (ADB Reverse)
+        Card(
+          color: const Color(0xFF0F172A),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: Color(0xFF1E293B)),
+          ),
+          child: ExpansionTile(
+            leading: const Icon(Icons.developer_mode, color: Color(0xFF38BDF8), size: 20),
+            title: const Text(
+              'Developer Option: Connect via ADB',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+            subtitle: const Text(
+              'Requires USB Debugging enabled in phone Developer Options',
+              style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+            ),
+            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            children: [
+              const Text(
+                'Uses "adb reverse tcp:8765 tcp:8765" over localhost. Once enabled, connects automatically in the background without touching tethering settings.',
+                style: TextStyle(fontSize: 12, color: Color(0xFFCBD5E1)),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF38BDF8),
+                    side: const BorderSide(color: Color(0xFF38BDF8)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  onPressed: isConnecting ? null : () => service.checkUsbStatus(preferAdb: true),
+                  icon: const Icon(Icons.terminal, size: 16),
+                  label: const Text('Connect via ADB Reverse'),
+                ),
+              ),
+            ],
+          ),
+        ),
+
         const SizedBox(height: 16),
 
-        // Setup instructions card
+        // 3. Universal 4 Connection Methods Reference Card
         Card(
           color: const Color(0xFF0F172A),
           shape: RoundedRectangleBorder(
@@ -896,16 +960,46 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
               children: [
                 const Row(
                   children: [
-                    Icon(Icons.terminal, color: Colors.tealAccent, size: 16),
+                    Icon(Icons.hub, color: Colors.tealAccent, size: 18),
                     SizedBox(width: 8),
-                    Text('Quick Setup', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    Text(
+                      '4 Universal Connection Methods',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
-                _setupStep('1', 'Connect phone to PC via USB cable'),
-                _setupStep('2', 'On PC terminal:\n  cd /path/to/OneClick\n  ./server/run_server.sh'),
-                _setupStep('3', 'In another terminal:\n  adb reverse tcp:8765 tcp:8765'),
-                _setupStep('4', 'Tap "Connect via USB" above'),
+                _methodRow(
+                  '1. USB Tethering',
+                  '< 1 ms',
+                  'Best zero-developer option. Plug cable & toggle USB Tethering.',
+                  Colors.tealAccent,
+                  Icons.usb,
+                ),
+                const Divider(color: Color(0xFF1E293B), height: 16),
+                _methodRow(
+                  '2. Local Wi-Fi',
+                  '3–8 ms',
+                  'Zero-cable wireless. Auto-discovered via UDP beacon.',
+                  Colors.blueAccent,
+                  Icons.wifi,
+                ),
+                const Divider(color: Color(0xFF1E293B), height: 16),
+                _methodRow(
+                  '3. Bluetooth',
+                  '12–25 ms',
+                  'Zero-router link. Standard Bluetooth pairing via RFCOMM.',
+                  Colors.indigoAccent,
+                  Icons.bluetooth,
+                ),
+                const Divider(color: Color(0xFF1E293B), height: 16),
+                _methodRow(
+                  '4. AOA 2.0 (Roadmap)',
+                  '< 1 ms',
+                  'Native Android Open Accessory protocol for direct USB host link.',
+                  Colors.purpleAccent,
+                  Icons.cable,
+                ),
               ],
             ),
           ),
@@ -914,32 +1008,43 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
     );
   }
 
-  Widget _setupStep(String num, String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 22,
-            height: 22,
-            decoration: BoxDecoration(
-              color: Colors.tealAccent.withValues(alpha: 0.15),
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: Text(num,
-                style: const TextStyle(color: Colors.tealAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+  Widget _methodRow(String title, String latency, String desc, Color color, IconData icon) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.15),
+            shape: BoxShape.circle,
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: Colors.white70),
-            ),
+          child: Icon(icon, color: color, size: 14),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white)),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(latency, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: color)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 2),
+              Text(desc, style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
