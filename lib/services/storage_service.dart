@@ -4,14 +4,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_settings.dart';
 import '../models/deck_models.dart';
 import '../models/desktop_device.dart';
-import '../models/obs_config.dart';
 
 class StorageService {
   static const String _keySettings = 'astradeck_settings_v1';
   static const String _keyProfiles = 'astradeck_profiles_v1';
   static const String _keyActiveProfileId = 'astradeck_active_profile_id';
   static const String _keyDevices = 'astradeck_devices_v1';
-  static const String _keyObsConfig = 'astradeck_obs_config_v1';
 
   final SharedPreferences _prefs;
 
@@ -49,7 +47,63 @@ class StorageService {
         final profiles = list
             .map((item) => DeckProfile.fromJson(Map<String, dynamic>.from(item)))
             .toList();
-        if (profiles.isNotEmpty) return profiles;
+        if (profiles.isNotEmpty) {
+          bool changed = false;
+          for (final p in profiles) {
+            for (final page in p.pages) {
+              for (int i = 0; i < page.buttons.length; i++) {
+                final b = page.buttons[i];
+                // Migrate any legacy obsAction buttons to usable 3-function actions
+                if (b.actionType == ActionType.obsAction) {
+                  if (b.id == 'btn_obs' || b.id == 's_start_stream' || b.title.toLowerCase().contains('obs') || b.title.toLowerCase().contains('live')) {
+                    page.buttons[i] = b.copyWith(
+                      title: b.title == 'Go Live' ? 'OBS Studio' : b.title,
+                      subtitle: 'App',
+                      iconName: 'videocam',
+                      actionType: ActionType.launchApp,
+                      actionPayload: {'app': 'OBS Studio'},
+                    );
+                  } else if (b.id == 's_scene_main') {
+                    page.buttons[i] = b.copyWith(
+                      title: 'Twitch Dash',
+                      subtitle: 'Live Chat',
+                      iconName: 'dashboard',
+                      actionType: ActionType.openWebsite,
+                      actionPayload: {'url': 'https://dashboard.twitch.tv'},
+                    );
+                  } else if (b.id == 's_scene_chat' || b.id == 's_end_stream') {
+                    page.buttons[i] = b.copyWith(
+                      title: 'Discord Voice',
+                      subtitle: 'Chat',
+                      iconName: 'chat',
+                      actionType: ActionType.launchApp,
+                      actionPayload: {'app': 'Discord'},
+                    );
+                  } else if (b.id == 's_brb' || b.id == 'g_clip') {
+                    page.buttons[i] = b.copyWith(
+                      title: 'Instant Clip',
+                      subtitle: 'Screenshot',
+                      iconName: 'camera_alt',
+                      actionType: ActionType.dynamicFunction,
+                      actionPayload: {'command': 'take screenshot of active window'},
+                    );
+                  } else {
+                    page.buttons[i] = b.copyWith(
+                      subtitle: 'App',
+                      actionType: ActionType.launchApp,
+                      actionPayload: {'app': 'OBS Studio'},
+                    );
+                  }
+                  changed = true;
+                }
+              }
+            }
+          }
+          if (changed) {
+            saveProfiles(profiles);
+          }
+          return profiles;
+        }
       } catch (e) {
         debugPrint('Failed to load profiles, generating built-ins: $e');
       }
@@ -85,47 +139,12 @@ class StorageService {
         debugPrint('Failed to load devices: $e');
       }
     }
-    // Seed default desktop device
-    final defaultDevice = DesktopDevice(
-      id: 'pc_primary_1',
-      name: 'Main Rig (Gaming PC)',
-      operatingSystem: 'Windows',
-      osVersion: '11 Pro',
-      agentVersion: '2.1.0',
-      ipAddress: '192.168.1.150',
-      port: 8765,
-      hostname: 'DESKTOP-RIG-X',
-      transport: ConnectionTransport.wifi,
-      isTrusted: true,
-      isPreferred: true,
-      lastConnected: DateTime.now().subtract(const Duration(minutes: 15)),
-      latencyMs: 14,
-    );
-    saveDevices([defaultDevice]);
-    return [defaultDevice];
+    return [];
   }
 
   Future<void> saveDevices(List<DesktopDevice> devices) async {
     final data = devices.map((d) => d.toJson()).toList();
     await _prefs.setString(_keyDevices, jsonEncode(data));
-  }
-
-  // --- OBS Config ---
-  ObsConfig loadObsConfig() {
-    final raw = _prefs.getString(_keyObsConfig);
-    if (raw != null) {
-      try {
-        final Map<String, dynamic> decoded = jsonDecode(raw);
-        return ObsConfig.fromJson(decoded);
-      } catch (e) {
-        debugPrint('Failed to parse OBS Config: $e');
-      }
-    }
-    return ObsConfig();
-  }
-
-  Future<void> saveObsConfig(ObsConfig config) async {
-    await _prefs.setString(_keyObsConfig, jsonEncode(config.toJson()));
   }
 
   // --- Full Wipe ---
@@ -236,55 +255,54 @@ class StorageService {
       DeckButton(
         id: 'btn_obs',
         title: 'OBS Studio',
-        subtitle: 'Broadcast',
+        subtitle: 'App',
         iconName: 'videocam',
         backgroundColor: 0xFF302E31,
         textColor: 0xFFFFFFFF,
         row: 2,
         col: 2,
-        actionType: ActionType.obsAction,
-        actionPayload: {'command': 'toggle_record'},
+        actionType: ActionType.launchApp,
+        actionPayload: {'app': 'OBS Studio'},
       ),
     ];
 
-    // 2. Streaming Profile
+    // 2. Streaming Profile (100% Usable with 3 Core Functions)
     final streamButtons = [
       DeckButton(
         id: 's_start_stream',
-        title: 'Go Live',
-        subtitle: 'OBS Stream',
-        iconName: 'podcasts',
+        title: 'OBS Studio',
+        subtitle: 'App',
+        iconName: 'videocam',
         backgroundColor: 0xFFDC2626,
         textColor: 0xFFFFFFFF,
         row: 0,
         col: 0,
-        actionType: ActionType.obsAction,
-        actionPayload: {'command': 'toggle_stream'},
-        requiresConfirmation: true,
+        actionType: ActionType.launchApp,
+        actionPayload: {'app': 'OBS Studio'},
       ),
       DeckButton(
         id: 's_scene_main',
-        title: 'Game Scene',
-        subtitle: 'Scene 1',
-        iconName: 'sports_esports',
-        backgroundColor: 0xFF2563EB,
+        title: 'Twitch Dash',
+        subtitle: 'Live Chat',
+        iconName: 'dashboard',
+        backgroundColor: 0xFF9146FF,
         textColor: 0xFFFFFFFF,
         row: 0,
         col: 1,
-        actionType: ActionType.obsAction,
-        actionPayload: {'command': 'switch_scene', 'scene': 'Main Gameplay'},
+        actionType: ActionType.openWebsite,
+        actionPayload: {'url': 'https://dashboard.twitch.tv'},
       ),
       DeckButton(
         id: 's_scene_chat',
-        title: 'Just Chat',
-        subtitle: 'Intermission',
-        iconName: 'forum',
-        backgroundColor: 0xFF7C3AED,
+        title: 'Discord Voice',
+        subtitle: 'Chat',
+        iconName: 'chat',
+        backgroundColor: 0xFF5865F2,
         textColor: 0xFFFFFFFF,
         row: 0,
         col: 2,
-        actionType: ActionType.obsAction,
-        actionPayload: {'command': 'switch_scene', 'scene': 'Intermission / Chat'},
+        actionType: ActionType.launchApp,
+        actionPayload: {'app': 'Discord'},
       ),
       DeckButton(
         id: 's_mic_mute',
@@ -300,15 +318,15 @@ class StorageService {
       ),
       DeckButton(
         id: 's_brb',
-        title: 'BRB Screen',
-        subtitle: 'AFK',
-        iconName: 'pause_circle',
+        title: 'Instant Clip',
+        subtitle: 'Screenshot',
+        iconName: 'camera_alt',
         backgroundColor: 0xFFD97706,
         textColor: 0xFFFFFFFF,
         row: 1,
         col: 1,
-        actionType: ActionType.obsAction,
-        actionPayload: {'command': 'switch_scene', 'scene': 'Be Right Back'},
+        actionType: ActionType.dynamicFunction,
+        actionPayload: {'command': 'take screenshot of active window'},
       ),
       DeckButton(
         id: 's_soundboard',
@@ -319,8 +337,8 @@ class StorageService {
         textColor: 0xFFFFFFFF,
         row: 1,
         col: 2,
-        actionType: ActionType.launchApp,
-        actionPayload: {'app': 'Soundboard'},
+        actionType: ActionType.dynamicFunction,
+        actionPayload: {'command': 'play notification sound'},
       ),
       DeckButton(
         id: 's_vol_down',
@@ -348,16 +366,15 @@ class StorageService {
       ),
       DeckButton(
         id: 's_end_stream',
-        title: 'End Stream',
-        subtitle: 'Offline',
-        iconName: 'stop_circle',
+        title: 'Stream Focus',
+        subtitle: 'DND Mode',
+        iconName: 'do_not_disturb',
         backgroundColor: 0xFF475569,
         textColor: 0xFFFFFFFF,
         row: 2,
         col: 2,
-        actionType: ActionType.obsAction,
-        actionPayload: {'command': 'switch_scene', 'scene': 'Ending Scene'},
-        requiresConfirmation: true,
+        actionType: ActionType.dynamicFunction,
+        actionPayload: {'command': 'toggle do not disturb notifications'},
       ),
     ];
 
@@ -444,8 +461,8 @@ class StorageService {
         textColor: 0xFFFFFFFF,
         row: 2,
         col: 0,
-        actionType: ActionType.obsAction,
-        actionPayload: {'command': 'save_replay_buffer'},
+        actionType: ActionType.dynamicFunction,
+        actionPayload: {'command': 'take screenshot of active window'},
       ),
       DeckButton(
         id: 'g_mute_sys',

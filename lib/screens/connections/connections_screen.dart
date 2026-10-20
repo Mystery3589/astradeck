@@ -176,19 +176,24 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
         const Text('Discovered & Configured Computers', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         const SizedBox(height: 8),
 
-        if (service.devices.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 32),
-            child: Center(
-              child: Text(
-                'No desktop agents found on the local network.\nTap "Auto-Discover PCs" or enter IP manually.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Color(0xFF94A3B8)),
+        Builder(builder: (context) {
+          final wifiDevices = service.devices.where((d) => d.transport == ConnectionTransport.wifi).toList();
+          if (wifiDevices.isEmpty) {
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: 32),
+              child: Center(
+                child: Text(
+                  'No Wi-Fi computers found.\nTap "Auto-Discover PCs" or enter IP manually.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFF94A3B8)),
+                ),
               ),
-            ),
-          )
-        else
-          ...service.devices.map((device) => _buildDeviceCard(context, device, service, settings)),
+            );
+          }
+          return Column(
+            children: wifiDevices.map((device) => _buildDeviceCard(context, device, service, settings)).toList(),
+          );
+        }),
       ],
     );
   }
@@ -230,9 +235,13 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
                     children: [
                       Row(
                         children: [
-                          Text(
-                            device.name,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
+                          Expanded(
+                            child: Text(
+                              device.name,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                           if (device.isPreferred) ...[
                             const SizedBox(width: 6),
@@ -243,10 +252,14 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
                       Text(
                         '${device.operatingSystem} ${device.osVersion} • Agent v${device.agentVersion}',
                         style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       Text(
                         '${device.ipAddress}:${device.port}${device.hostname.isNotEmpty ? " (${device.hostname})" : ""}',
                         style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
@@ -268,7 +281,11 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
             const SizedBox(height: 12),
             const Divider(color: Color(0xFF334155), height: 1),
             const SizedBox(height: 10),
-            Row(
+            Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 if (!device.isTrusted)
                   Container(
@@ -288,39 +305,69 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
                     ),
                     child: const Text('Trusted', style: TextStyle(color: Colors.blueAccent, fontSize: 10, fontWeight: FontWeight.bold)),
                   ),
-                const Spacer(),
-                TextButton(
-                  onPressed: () async {
-                    final lat = await service.testConnection(device);
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Ping to ${device.name}: ${lat}ms')),
-                    );
-                  },
-                  child: const Text('Test Ping', style: TextStyle(fontSize: 12, color: Colors.white70)),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextButton(
+                      onPressed: () async {
+                        final lat = await service.testConnection(device);
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Ping to ${device.name}: ${lat}ms')),
+                        );
+                      },
+                      child: const Text('Test Ping', style: TextStyle(fontSize: 12, color: Colors.white70)),
+                    ),
+                    const SizedBox(width: 4),
+                    if (isConnected)
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.redAccent,
+                          side: const BorderSide(color: Colors.redAccent),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        ),
+                        onPressed: () => service.disconnect(device),
+                        child: const Text('Disconnect', style: TextStyle(fontSize: 12)),
+                      )
+                    else
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: settings.settings.accentColor,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        ),
+                        onPressed: isConnecting
+                            ? null
+                            : () => _promptConnect(context, service, device),
+                        child: isConnecting
+                            ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Text('Connect', style: TextStyle(fontSize: 12)),
+                      ),
+                    const SizedBox(width: 4),
+                    IconButton(
+                      tooltip: 'Forget device',
+                      icon: const Icon(Icons.delete_outline, size: 18, color: Color(0xFF64748B)),
+                      onPressed: () async {
+                        final confirm = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            backgroundColor: const Color(0xFF1E293B),
+                            title: const Text('Forget device?', style: TextStyle(color: Colors.white)),
+                            content: Text('Remove "${device.name}" from the list?', style: const TextStyle(color: Color(0xFF94A3B8))),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx, true),
+                                child: const Text('Forget', style: TextStyle(color: Colors.redAccent)),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (confirm == true) service.forgetDevice(device.id);
+                      },
+                    ),
+                  ],
                 ),
-                if (isConnected)
-                  OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.redAccent,
-                      side: const BorderSide(color: Colors.redAccent),
-                    ),
-                    onPressed: () => service.disconnect(device),
-                    child: const Text('Disconnect'),
-                  )
-                else
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: settings.settings.accentColor,
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: isConnecting
-                        ? null
-                        : () => _promptConnect(context, service, device),
-                    child: isConnecting
-                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Text('Connect'),
-                  ),
               ],
             ),
           ],
@@ -331,11 +378,19 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
 
   // --- 2. Bluetooth Classic Tab ---
   Widget _buildBluetoothTab(BuildContext context, ConnectionService service, SettingsService settings) {
+    final pairedDevices = service.discoveredBluetoothDevices.where((d) => d['bonded'] == true).toList();
+    final nearbyDevices = service.discoveredBluetoothDevices.where((d) => d['bonded'] != true).toList();
+    final isConnected = service.isBtConnected;
+    final connectedAddress = service.btConnectedAddress;
+    final connectingAddress = service.btConnectingAddress;
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // 1. Status & Scan Control Header Card
         Card(
           color: const Color(0xFF1E293B),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -343,71 +398,320 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.bluetooth, color: Colors.blueAccent),
-                    const SizedBox(width: 8),
-                    const Text('Bluetooth Serial / RFCOMM', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                    const Spacer(),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: Colors.blue.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(12),
+                        color: isConnected
+                            ? const Color(0xFF10B981).withValues(alpha: 0.2)
+                            : Colors.blueAccent.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Text('Adapter Ready', style: TextStyle(color: Colors.blueAccent, fontSize: 11)),
+                      child: Icon(
+                        isConnected ? Icons.bluetooth_connected : Icons.bluetooth,
+                        color: isConnected ? const Color(0xFF10B981) : Colors.blueAccent,
+                        size: 24,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            isConnected ? 'Bluetooth Connected' : 'Bluetooth RFCOMM',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            isConnected
+                                ? 'Active link to companion on Channel 4'
+                                : 'Direct wireless link without Wi-Fi router',
+                            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Allows direct hardware link without local Wi-Fi or router setup. Requires the desktop agent to have Bluetooth RFCOMM listener enabled.',
-                  style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
-                ),
                 const SizedBox(height: 16),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: settings.settings.accentColor,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: service.isBluetoothScanning ? null : () => service.scanBluetooth(),
-                  icon: const Icon(Icons.bluetooth_searching),
-                  label: Text(service.isBluetoothScanning ? 'Searching Bluetooth...' : 'Scan Nearby Devices'),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: settings.settings.accentColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      ),
+                      onPressed: service.isBluetoothScanning
+                          ? () => service.stopBluetoothScan()
+                          : () => service.scanBluetooth(),
+                      icon: service.isBluetoothScanning
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.bluetooth_searching, size: 18),
+                      label: Text(service.isBluetoothScanning ? 'Scanning... (Stop)' : 'Search Nearby Devices'),
+                    ),
+                    if (isConnected)
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.redAccent,
+                          side: const BorderSide(color: Colors.redAccent),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        ),
+                        onPressed: () => service.disconnectBluetooth(),
+                        icon: const Icon(Icons.link_off, size: 16),
+                        label: const Text('Disconnect'),
+                      ),
+                  ],
                 ),
               ],
             ),
           ),
         ),
+
         const SizedBox(height: 16),
-        const Text('Paired & Discovered Bluetooth Hosts', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-        const SizedBox(height: 8),
-        if (service.discoveredBluetoothDevices.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(
+
+        // 2. Active Bluetooth Connection Banner (if connected)
+        if (isConnected) ...[
+          Card(
+            color: const Color(0xFF0F2E1E),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: const BorderSide(color: Color(0xFF10B981), width: 1.5),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Color(0xFF10B981), size: 22),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          service.activeDevice?.name ?? 'Connected PC',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        ),
+                        Text(
+                          'MAC: $connectedAddress • Latency: ${service.activeDevice?.latencyMs ?? 0}ms',
+                          style: const TextStyle(color: Color(0xFF6EE7B7), fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        // 3. Paired Devices Section
+        Row(
+          children: [
+            const Icon(Icons.devices, size: 16, color: Colors.blueAccent),
+            const SizedBox(width: 6),
+            const Text(
+              'Paired Devices',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(10),
+              ),
               child: Text(
-                'No Bluetooth hosts scanned yet.\nTap "Scan Nearby Devices" to discover paired PCs.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Color(0xFF64748B)),
+                '${pairedDevices.length}',
+                style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+
+        if (pairedDevices.isEmpty && !service.isBluetoothScanning)
+          Card(
+            color: const Color(0xFF0F172A),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: const BorderSide(color: Color(0xFF1E293B)),
+            ),
+            child: const Padding(
+              padding: EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: Color(0xFF94A3B8), size: 18),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'No paired Bluetooth devices found.\nTap "Search Nearby Devices" to pair your PC.',
+                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                    ),
+                  ),
+                ],
               ),
             ),
           )
         else
-          ...service.discoveredBluetoothDevices.map((bt) {
+          ...pairedDevices.map((bt) {
+            final addr = bt['address']?.toString() ?? '';
+            final name = bt['name']?.toString() ?? addr;
+            final isThisConnected = isConnected && connectedAddress == addr;
+            final isThisConnecting = connectingAddress == addr;
+
             return Card(
-              child: ListTile(
-                leading: const Icon(Icons.bluetooth_connected, color: Colors.blueAccent),
-                title: Text(bt['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text('MAC: ${bt['address']} • RSSI: ${bt['rssi']} dBm'),
-                trailing: ElevatedButton(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Connected to Bluetooth host ${bt['name']}')),
-                    );
-                  },
-                  child: const Text('Pair & Link'),
+              color: isThisConnected ? const Color(0xFF1E293B) : const Color(0xFF141E30),
+              margin: const EdgeInsets.only(bottom: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(
+                  color: isThisConnected ? const Color(0xFF10B981) : const Color(0xFF334155),
+                  width: isThisConnected ? 1.5 : 1,
                 ),
+              ),
+              child: ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: isThisConnected
+                        ? const Color(0xFF10B981).withValues(alpha: 0.2)
+                        : Colors.white10,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    isThisConnected ? Icons.bluetooth_connected : Icons.computer,
+                    color: isThisConnected ? const Color(0xFF10B981) : Colors.white70,
+                    size: 20,
+                  ),
+                ),
+                title: Text(
+                  name,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  'Address: $addr',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                ),
+                trailing: isThisConnected
+                    ? Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Text(
+                          'CONNECTED',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+                        ),
+                      )
+                    : isThisConnecting
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.blueAccent),
+                          )
+                        : ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: settings.settings.accentColor,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: () => service.connectBluetooth(addr, name: name),
+                            child: const Text('Connect'),
+                          ),
               ),
             );
           }),
+
+        const SizedBox(height: 16),
+
+        // 4. Nearby Discovered Devices Section (Unbonded)
+        if (nearbyDevices.isNotEmpty) ...[
+          Row(
+            children: [
+              const Icon(Icons.radar, size: 16, color: Colors.amber),
+              const SizedBox(width: 6),
+              const Text(
+                'Nearby Devices',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '${nearbyDevices.length}',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...nearbyDevices.map((bt) {
+            final addr = bt['address']?.toString() ?? '';
+            final name = bt['name']?.toString() ?? addr;
+            final isThisConnecting = connectingAddress == addr;
+
+            return Card(
+              color: const Color(0xFF141E30),
+              margin: const EdgeInsets.only(bottom: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: const BorderSide(color: Color(0xFF334155)),
+              ),
+              child: ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.bluetooth_searching, color: Colors.amber, size: 20),
+                ),
+                title: Text(
+                  name,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  'MAC: $addr',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                ),
+                trailing: isThisConnecting
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.amber),
+                      )
+                    : OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.amber,
+                          side: const BorderSide(color: Colors.amber),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        onPressed: () => service.connectBluetooth(addr, name: name),
+                        child: const Text('Pair & Connect'),
+                      ),
+              ),
+            );
+          }),
+        ],
       ],
     );
   }
@@ -740,14 +1044,15 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
           TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () {
+              final pin = pinCtrl.text.trim();
               Navigator.of(ctx).pop();
-              service.connectTo(device, pin: pinCtrl.text.trim());
+              service.connectTo(device, pin: pin);
             },
             child: const Text('Pair & Connect'),
           ),
         ],
       ),
-    );
+    ).then((_) => pinCtrl.dispose());
   }
 
   void _showManualAddDialog(BuildContext context, ConnectionService service) {
@@ -774,19 +1079,26 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
           TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () {
-              if (ipCtrl.text.isNotEmpty) {
-                service.addManualDevice(
-                  name: nameCtrl.text.trim(),
-                  ipAddress: ipCtrl.text.trim(),
-                  port: int.tryParse(portCtrl.text) ?? 8765,
-                );
+              final ip = ipCtrl.text.trim();
+              final name = nameCtrl.text.trim();
+              final port = int.tryParse(portCtrl.text.trim()) ?? 8765;
+              if (ip.isNotEmpty) {
                 Navigator.of(ctx).pop();
+                service.addManualDevice(
+                  name: name,
+                  ipAddress: ip,
+                  port: port,
+                );
               }
             },
             child: const Text('Add'),
           ),
         ],
       ),
-    );
+    ).then((_) {
+      ipCtrl.dispose();
+      portCtrl.dispose();
+      nameCtrl.dispose();
+    });
   }
 }

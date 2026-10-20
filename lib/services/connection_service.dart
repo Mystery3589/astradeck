@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../models/desktop_device.dart';
 import 'storage_service.dart';
@@ -33,6 +34,20 @@ class ConnectionService extends ChangeNotifier {
   Timer? _reconnectTimer;
   Timer? _livePollTimer;
   bool _isLivePolling = false;
+  int _lastPingSent = 0;
+  int _lastPongReceived = 0;
+
+  /// Called when the server pushes a system_state message with current volume/brightness.
+  void Function(double? volume, double? brightness)? onSystemState;
+
+  // --- Bluetooth Platform Channel Fields ---
+  static const _btMethod = MethodChannel('com.astradeck/bluetooth');
+  static const _btEvents = EventChannel('com.astradeck/bluetooth_events');
+  StreamSubscription? _btEventSub;
+  bool _isBtConnected = false;
+  String? _btConnectedAddress;
+  String? _btConnectingAddress;
+  Timer? _btPingTimer;
 
   bool _isBluetoothScanning = false;
   List<Map<String, dynamic>> _discoveredBluetoothDevices = [];
@@ -41,22 +56,38 @@ class ConnectionService extends ChangeNotifier {
   String _usbDeviceDetails =
       'Connect phone via USB cable, then run 1-click setup on PC.';
 
+  int _consecutiveReconnectFailures = 0;
+  bool _isAutoReconnecting = false;
+  bool _isManualDisconnect = false;
+
   ConnectionService(this._storage) {
+    _initBluetoothListener();
     _loadInitial();
   }
 
   List<DesktopDevice> get devices => _devices;
   DesktopDevice? get activeDevice => _activeDevice;
-  bool get isConnected => _activeDevice?.status == ConnectionStatus.connected;
+  bool get isConnected =>
+      (_activeDevice?.status == ConnectionStatus.connected) || _isBtConnected;
   bool get isConnecting =>
-      _activeDevice?.status == ConnectionStatus.connecting || _isUsbConnecting;
+      _activeDevice?.status == ConnectionStatus.connecting ||
+      _isUsbConnecting ||
+      (_btConnectingAddress != null);
   bool get isScanning => _isScanning;
   bool get isLivePolling => _isLivePolling;
   String? get lastError => _lastError;
 
+  int get consecutiveReconnectFailures => _consecutiveReconnectFailures;
+  bool get isAutoReconnecting => _isAutoReconnecting;
+  bool get isWaitingForHost =>
+      !isConnected && _isAutoReconnecting && _consecutiveReconnectFailures >= 2;
+
   bool get isBluetoothScanning => _isBluetoothScanning;
   List<Map<String, dynamic>> get discoveredBluetoothDevices =>
       _discoveredBluetoothDevices;
+  bool get isBtConnected => _isBtConnected;
+  String? get btConnectedAddress => _btConnectedAddress;
+  String? get btConnectingAddress => _btConnectingAddress;
 
   bool get isUsbConnecting => _isUsbConnecting;
   bool get isUsbConnected =>
@@ -65,10 +96,10 @@ class ConnectionService extends ChangeNotifier {
 
   void _loadInitial() {
     _devices = _storage.loadDevices();
-    if (!_devices.any((d) => d.id == 'usb_localhost')) {
-      _devices.insert(0, _makeUsbLocalhost());
-      _storage.saveDevices(_devices);
-    }
+    // Prune any legacy transient usb_localhost entries from disk
+    _devices.removeWhere((d) => d.id == 'usb_localhost');
+    _savePersistentDevices();
+
     final preferred = _devices.where((d) => d.isPreferred).firstOrNull;
     if (preferred != null) {
       _activeDevice = preferred;
@@ -78,6 +109,13 @@ class ConnectionService extends ChangeNotifier {
 
     // Proactively attempt auto-connection across transports on startup
     Future.delayed(const Duration(milliseconds: 300), () => autoConnect());
+  }
+
+  Future<void> _savePersistentDevices() async {
+    final toSave = _devices
+        .where((d) => d.id != 'usb_localhost' && d.transport == ConnectionTransport.wifi)
+        .toList();
+    await _storage.saveDevices(toSave);
   }
 
   // ---------------------------------------------------------------------------
@@ -110,7 +148,7 @@ class ConnectionService extends ChangeNotifier {
         _devices.insert(0, _makeUsbLocalhost(port: usbPort));
       }
       final usbDevice = _devices.firstWhere((d) => d.id == 'usb_localhost');
-      return await connectTo(usbDevice, pin: '1234');
+      return await connectTo(usbDevice, pin: usbDevice.authToken != null ? null : '1234');
     }
 
     // 2. Probe preferred device
@@ -118,14 +156,14 @@ class ConnectionService extends ChangeNotifier {
         _devices.where((d) => d.isPreferred && d.id != 'usb_localhost').firstOrNull;
     if (preferred != null) {
       if (await _tcpProbe(preferred.ipAddress, preferred.port, timeout: 600)) {
-        return await connectTo(preferred, pin: '1234');
+        return await connectTo(preferred, pin: preferred.authToken != null ? null : '1234');
       }
     }
 
     // 3. Probe any trusted device
     for (final dev in _devices.where((d) => d.isTrusted && d.id != 'usb_localhost')) {
       if (await _tcpProbe(dev.ipAddress, dev.port, timeout: 400)) {
-        return await connectTo(dev, pin: '1234');
+        return await connectTo(dev, pin: dev.authToken != null ? null : '1234');
       }
     }
 
@@ -253,7 +291,10 @@ class ConnectionService extends ChangeNotifier {
   }
 
   void _handleBeacon(Map<String, dynamic> json, String sourceIp) {
-    final ip = json['ip'] ?? sourceIp;
+    // sourceIp is the actual IP the phone received the packet from — guaranteed reachable!
+    final ip = (sourceIp.isNotEmpty && sourceIp != '0.0.0.0' && sourceIp != '127.0.0.1')
+        ? sourceIp
+        : (json['ip']?.toString() ?? sourceIp);
     final port = (json['port'] as num?)?.toInt() ?? 8765;
     final name = json['name'] ?? 'AstraDeck Host';
     final exists =
@@ -275,7 +316,7 @@ class ConnectionService extends ChangeNotifier {
         transport: ConnectionTransport.wifi,
       ));
     }
-    _storage.saveDevices(_devices);
+    _savePersistentDevices();
     notifyListeners();
   }
 
@@ -303,8 +344,9 @@ class ConnectionService extends ChangeNotifier {
       for (int port = 8765; port <= 8768; port++) {
         if (await _tcpProbe(ip, port, timeout: 350)) {
           if (!_devices.any((d) => d.ipAddress == ip && d.port == port)) {
+            final uniqueId = 'dev_${DateTime.now().microsecondsSinceEpoch}_${Random().nextInt(10000)}_${ip.replaceAll('.', '')}';
             _devices.add(DesktopDevice(
-              id: 'dev_${DateTime.now().millisecondsSinceEpoch}_${ip.replaceAll('.', '')}',
+              id: uniqueId,
               name: 'AstraDeck Host ($ip)',
               operatingSystem: 'Desktop',
               osVersion: '',
@@ -313,7 +355,7 @@ class ConnectionService extends ChangeNotifier {
               port: port,
               transport: ConnectionTransport.wifi,
             ));
-            _storage.saveDevices(_devices);
+            _savePersistentDevices();
             notifyListeners();
           }
           break;
@@ -351,7 +393,7 @@ class ConnectionService extends ChangeNotifier {
       isTrusted: false,
     );
     _devices.add(newDevice);
-    await _storage.saveDevices(_devices);
+    await _savePersistentDevices();
     notifyListeners();
     return newDevice;
   }
@@ -362,10 +404,10 @@ class ConnectionService extends ChangeNotifier {
 
   Future<bool> connectTo(DesktopDevice device, {String? pin}) async {
     _lastError = null;
-    final index = _devices.indexWhere((d) => d.id == device.id);
-    if (index == -1) return false;
+    final initialIndex = _devices.indexWhere((d) => d.id == device.id);
+    if (initialIndex == -1) return false;
 
-    _devices[index].status = ConnectionStatus.connecting;
+    _devices[initialIndex].status = ConnectionStatus.connecting;
     notifyListeners();
 
     try {
@@ -373,7 +415,7 @@ class ConnectionService extends ChangeNotifier {
       _closeWs();
 
       _wsChannel = WebSocketChannel.connect(wsUri);
-      await _wsChannel!.ready.timeout(const Duration(seconds: 5));
+      await _wsChannel!.ready.timeout(const Duration(seconds: 4));
 
       final completer = Completer<bool>();
 
@@ -381,26 +423,38 @@ class ConnectionService extends ChangeNotifier {
         (data) {
           try {
             final json = jsonDecode(data.toString());
+            final currentIdx = _devices.indexWhere((d) => d.id == device.id);
+            if (currentIdx == -1) return;
+
             if (json['type'] == 'pong') {
+              _lastPongReceived = DateTime.now().millisecondsSinceEpoch;
               final sendTime = json['timestamp'] as int? ?? 0;
               if (sendTime > 0) {
-                _devices[index].latencyMs =
+                _devices[currentIdx].latencyMs =
                     DateTime.now().millisecondsSinceEpoch - sendTime;
                 notifyListeners();
               }
+            } else if (json['type'] == 'system_state') {
+              // Server pushed volume/brightness after auth — notify listeners to sync
+              final vol = (json['volume'] as num?)?.toDouble();
+              final brightness = (json['brightness'] as num?)?.toDouble();
+              onSystemState?.call(vol, brightness);
             } else if (json['status'] == 'authenticated') {
-              _devices[index].status = ConnectionStatus.connected;
-              _devices[index].isTrusted = true;
-              _devices[index].authToken = json['token'] ?? 'session_ok';
-              _devices[index].lastConnected = DateTime.now();
-              _activeDevice = _devices[index];
-              _storage.saveDevices(_devices);
-              _startHeartbeat(index);
+              _devices[currentIdx].status = ConnectionStatus.connected;
+              _devices[currentIdx].isTrusted = true;
+              _devices[currentIdx].authToken = json['token'] ?? 'session_ok';
+              _devices[currentIdx].lastConnected = DateTime.now();
+              _activeDevice = _devices[currentIdx];
+              _consecutiveReconnectFailures = 0;
+              _isAutoReconnecting = false;
+              _isManualDisconnect = false;
+              _storage.saveDevices(_devices.where((d) => d.transport == ConnectionTransport.wifi).toList());
+              _startHeartbeat(currentIdx);
               stopLivePolling();
               notifyListeners();
               if (!completer.isCompleted) completer.complete(true);
             } else if (json['status'] == 'unauthorized') {
-              _devices[index].status = ConnectionStatus.unauthorized;
+              _devices[currentIdx].status = ConnectionStatus.unauthorized;
               _lastError = json['message'] ?? 'Invalid PIN';
               notifyListeners();
               if (!completer.isCompleted) completer.complete(false);
@@ -410,43 +464,95 @@ class ConnectionService extends ChangeNotifier {
           }
         },
         onError: (err) {
-          _devices[index].status = ConnectionStatus.failed;
+          final currentIdx = _devices.indexWhere((d) => d.id == device.id);
+          if (currentIdx != -1) {
+            _devices[currentIdx].status = ConnectionStatus.failed;
+          }
           _lastError = 'Connection lost: $err';
           notifyListeners();
           if (!completer.isCompleted) completer.complete(false);
+          if (!_isManualDisconnect) {
+            _scheduleAutoReconnect(device, pin: pin);
+          }
         },
         onDone: () {
+          final currentIdx = _devices.indexWhere((d) => d.id == device.id);
           if (_activeDevice?.id == device.id &&
-              index < _devices.length &&
-              _devices[index].status == ConnectionStatus.connected) {
-            _devices[index].status = ConnectionStatus.disconnected;
+              currentIdx != -1 &&
+              _devices[currentIdx].status == ConnectionStatus.connected) {
+            _devices[currentIdx].status = ConnectionStatus.disconnected;
             _activeDevice?.status = ConnectionStatus.disconnected;
-            _lastError = 'Server disconnected. Reconnecting in 5s...';
+            _lastError = 'Companion disconnected. Retrying...';
             _pingTimer?.cancel();
             notifyListeners();
-            _reconnectTimer?.cancel();
-            _reconnectTimer = Timer(const Duration(seconds: 5), () {
-              connectTo(_devices[index], pin: pin ?? '1234');
-            });
+            if (!_isManualDisconnect) {
+              _scheduleAutoReconnect(device, pin: pin);
+            }
           }
         },
       );
 
-      // Authenticate with either token or PIN
+      // Authenticate with token or PIN
+      final resolvedPin = pin ?? (device.authToken != null ? '' : '1234');
       _wsChannel!.sink.add(jsonEncode({
         'action': 'auth',
-        'pin': pin ?? '1234',
+        'pin': resolvedPin,
         'token': device.authToken ?? '',
         'id': 1,
       }));
 
-      return await completer.future.timeout(const Duration(seconds: 5));
+      try {
+        return await completer.future.timeout(const Duration(seconds: 4));
+      } on TimeoutException {
+        if (!completer.isCompleted) completer.complete(false);
+        final currentIdx = _devices.indexWhere((d) => d.id == device.id);
+        if (currentIdx != -1 && _devices[currentIdx].status == ConnectionStatus.connecting) {
+          _devices[currentIdx].status = ConnectionStatus.failed;
+          _lastError = 'Authentication timed out';
+          notifyListeners();
+        }
+        return false;
+      }
     } catch (e) {
-      _devices[index].status = ConnectionStatus.failed;
+      final currentIdx = _devices.indexWhere((d) => d.id == device.id);
+      if (currentIdx != -1) {
+        _devices[currentIdx].status = ConnectionStatus.failed;
+      }
       _lastError = 'Cannot reach ${device.ipAddress}:${device.port}';
       notifyListeners();
       return false;
     }
+  }
+
+  void _scheduleAutoReconnect(DesktopDevice device, {String? pin}) {
+    if (_isManualDisconnect) return;
+    _isAutoReconnecting = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(const Duration(seconds: 2), () async {
+      if (isConnected || _isManualDisconnect) {
+        _isAutoReconnecting = false;
+        return;
+      }
+
+      // If USB localhost, probe open ports in case companion auto-restarted on a shifted port
+      if (device.id == 'usb_localhost') {
+        final newPort = await findOpenUsbPort();
+        if (newPort != null) {
+          device.port = newPort;
+          final usbIndex = _devices.indexWhere((d) => d.id == 'usb_localhost');
+          if (usbIndex != -1) {
+            _devices[usbIndex].port = newPort;
+          }
+        }
+      }
+
+      final ok = await connectTo(device, pin: pin);
+      if (!ok && !_isManualDisconnect && !isConnected) {
+        _consecutiveReconnectFailures++;
+        notifyListeners();
+        _scheduleAutoReconnect(device, pin: pin);
+      }
+    });
   }
 
   void _closeWs() {
@@ -459,9 +565,16 @@ class ConnectionService extends ChangeNotifier {
   }
 
   void disconnect([DesktopDevice? device]) {
+    _isManualDisconnect = true;
+    _isAutoReconnecting = false;
+    _consecutiveReconnectFailures = 0;
     _closeWs();
     final target = device ?? _activeDevice;
     if (target != null) {
+      if (target.transport == ConnectionTransport.bluetooth ||
+          target.id.startsWith('bt_')) {
+        disconnectBluetooth();
+      }
       final index = _devices.indexWhere((d) => d.id == target.id);
       if (index != -1) _devices[index].status = ConnectionStatus.disconnected;
       if (_activeDevice?.id == target.id) {
@@ -472,12 +585,16 @@ class ConnectionService extends ChangeNotifier {
   }
 
   void disconnectAll() {
+    _isManualDisconnect = true;
+    _isAutoReconnecting = false;
+    _consecutiveReconnectFailures = 0;
     _closeWs();
+    disconnectBluetooth();
     for (var d in _devices) {
       d.status = ConnectionStatus.disconnected;
     }
     _activeDevice = null;
-    _storage.saveDevices(_devices);
+    _savePersistentDevices();
     notifyListeners();
   }
 
@@ -488,7 +605,7 @@ class ConnectionService extends ChangeNotifier {
       _activeDevice = null;
     }
     _devices.removeWhere((d) => d.id == id);
-    await _storage.saveDevices(_devices);
+    await _savePersistentDevices();
     notifyListeners();
   }
 
@@ -496,7 +613,7 @@ class ConnectionService extends ChangeNotifier {
     for (var d in _devices) {
       d.isPreferred = (d.id == id);
     }
-    await _storage.saveDevices(_devices);
+    await _savePersistentDevices();
     notifyListeners();
   }
 
@@ -508,7 +625,7 @@ class ConnectionService extends ChangeNotifier {
       if (_devices[index].status == ConnectionStatus.connected) {
         disconnect(_devices[index]);
       }
-      await _storage.saveDevices(_devices);
+      await _savePersistentDevices();
       notifyListeners();
     }
   }
@@ -523,6 +640,15 @@ class ConnectionService extends ChangeNotifier {
       }));
       await Future.delayed(const Duration(milliseconds: 100));
       return device.latencyMs;
+    } else if (_isBtConnected) {
+      final payload = jsonEncode({
+        'action': 'ping',
+        'timestamp': start,
+        'id': Random().nextInt(10000),
+      });
+      _btMethod.invokeMethod('sendData', {'data': payload});
+      await Future.delayed(const Duration(milliseconds: 100));
+      return device.latencyMs;
     }
     return -1;
   }
@@ -534,7 +660,15 @@ class ConnectionService extends ChangeNotifier {
         'payload': payload,
         'id': DateTime.now().millisecondsSinceEpoch,
       }));
-      debugPrint('[ConnectionService] -> $action');
+      debugPrint('[ConnectionService WS] -> $action');
+    } else if (_isBtConnected) {
+      final data = jsonEncode({
+        'action': action,
+        'payload': payload,
+        'id': DateTime.now().millisecondsSinceEpoch,
+      });
+      _btMethod.invokeMethod('sendData', {'data': data});
+      debugPrint('[ConnectionService BT] -> $action');
     } else {
       debugPrint('[ConnectionService] dropped (not connected): $action');
     }
@@ -542,33 +676,291 @@ class ConnectionService extends ChangeNotifier {
 
   void _startHeartbeat(int deviceIndex) {
     _pingTimer?.cancel();
-    _pingTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _lastPingSent = DateTime.now().millisecondsSinceEpoch;
+    _lastPongReceived = _lastPingSent;
+
+    _pingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (_wsChannel != null && isConnected) {
         final now = DateTime.now().millisecondsSinceEpoch;
+
+        // Watchdog: If cable was yanked or PC crashed, missed pongs for >3.5s triggers instant disconnect!
+        if (_lastPingSent > 0 && (now - _lastPongReceived) > 3500) {
+          debugPrint('[Heartbeat Watchdog] No pong for >3.5s (cable unplugged or host offline). Dropping socket.');
+          _pingTimer?.cancel();
+          _closeWs();
+          if (deviceIndex < _devices.length) {
+            _devices[deviceIndex].status = ConnectionStatus.disconnected;
+          }
+          if (_activeDevice != null &&
+              deviceIndex < _devices.length &&
+              _activeDevice!.id == _devices[deviceIndex].id) {
+            _activeDevice!.status = ConnectionStatus.disconnected;
+          }
+          notifyListeners();
+          if (!_isManualDisconnect && deviceIndex < _devices.length) {
+            _scheduleAutoReconnect(_devices[deviceIndex]);
+          }
+          return;
+        }
+
+        _lastPingSent = now;
         _wsChannel!.sink.add(
             jsonEncode({'action': 'ping', 'timestamp': now, 'id': now}));
       }
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // Native Bluetooth Implementation
+  // ---------------------------------------------------------------------------
+
+  void _initBluetoothListener() {
+    _btEventSub?.cancel();
+    _btEventSub = _btEvents.receiveBroadcastStream().listen((dynamic event) {
+      if (event is! Map) return;
+      final type = event['event']?.toString();
+      debugPrint('[BT Event] $type');
+
+      if (type == 'device_found') {
+        final address = event['address']?.toString() ?? '';
+        final name = event['name']?.toString() ?? address;
+        final bonded = event['bonded'] == true;
+        if (address.isNotEmpty) {
+          final idx = _discoveredBluetoothDevices
+              .indexWhere((d) => d['address'] == address);
+          if (idx != -1) {
+            _discoveredBluetoothDevices[idx] = {
+              'name': name,
+              'address': address,
+              'bonded': bonded,
+            };
+          } else {
+            _discoveredBluetoothDevices.add({
+              'name': name,
+              'address': address,
+              'bonded': bonded,
+            });
+          }
+          notifyListeners();
+        }
+      } else if (type == 'discovery_finished') {
+        _isBluetoothScanning = false;
+        notifyListeners();
+      } else if (type == 'connected') {
+        _isBtConnected = true;
+        _btConnectingAddress = null;
+        final address = event['address']?.toString() ?? '';
+        final name = event['name']?.toString() ?? 'Bluetooth Device';
+        _btConnectedAddress = address;
+
+        final deviceId = 'bt_$address';
+        int idx = _devices.indexWhere((d) => d.id == deviceId);
+        if (idx == -1) {
+          final btDev = DesktopDevice(
+            id: deviceId,
+            name: name,
+            ipAddress: address,
+            port: 4,
+            transport: ConnectionTransport.bluetooth,
+            status: ConnectionStatus.connected,
+            isTrusted: true,
+            lastConnected: DateTime.now(),
+          );
+          _devices.add(btDev);
+          idx = _devices.length - 1;
+        } else {
+          _devices[idx].status = ConnectionStatus.connected;
+          _devices[idx].name = name;
+          _devices[idx].lastConnected = DateTime.now();
+        }
+        _activeDevice = _devices[idx];
+        // Do not persist BT devices — they are transient and auto-discovered on each scan
+        _startBtHeartbeat(idx);
+        notifyListeners();
+      } else if (type == 'connect_failed') {
+        _isBtConnected = false;
+        _btConnectingAddress = null;
+        _lastError = event['error']?.toString() ?? 'Bluetooth connection failed';
+        if (_btConnectedAddress != null) {
+          final idx =
+              _devices.indexWhere((d) => d.id == 'bt_$_btConnectedAddress');
+          if (idx != -1) _devices[idx].status = ConnectionStatus.failed;
+        }
+        notifyListeners();
+      } else if (type == 'disconnected') {
+        _isBtConnected = false;
+        _btConnectingAddress = null;
+        _btPingTimer?.cancel();
+        if (_btConnectedAddress != null) {
+          final idx =
+              _devices.indexWhere((d) => d.id == 'bt_$_btConnectedAddress');
+          if (idx != -1) _devices[idx].status = ConnectionStatus.disconnected;
+        }
+        if (_activeDevice?.id == 'bt_$_btConnectedAddress') {
+          _activeDevice?.status = ConnectionStatus.disconnected;
+        }
+        _btConnectedAddress = null;
+        notifyListeners();
+      } else if (type == 'data') {
+        try {
+          final raw = event['message']?.toString() ?? '';
+          if (raw.isNotEmpty) {
+            final json = jsonDecode(raw);
+            if (json is Map) {
+              if (json['type'] == 'pong') {
+                final sendTime = json['timestamp'] as int? ?? 0;
+                if (sendTime > 0 && _btConnectedAddress != null) {
+                  final idx = _devices
+                      .indexWhere((d) => d.id == 'bt_$_btConnectedAddress');
+                  if (idx != -1) {
+                    _devices[idx].latencyMs =
+                        DateTime.now().millisecondsSinceEpoch - sendTime;
+                    notifyListeners();
+                  }
+                }
+              } else if (json['type'] == 'system_state') {
+                final vol = (json['volume'] as num?)?.toDouble();
+                final brightness = (json['brightness'] as num?)?.toDouble();
+                onSystemState?.call(vol, brightness);
+              }
+            }
+          }
+        } catch (e) {
+          debugPrint('BT data decode error: $e');
+        }
+      }
+    }, onError: (err) {
+      debugPrint('[BT Event Stream Error] $err');
+    });
+  }
+
+  Future<bool> isBluetoothSupported() async {
+    try {
+      final res = await _btMethod.invokeMethod<bool>('isBluetoothSupported');
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> isBluetoothEnabled() async {
+    try {
+      final res = await _btMethod.invokeMethod<bool>('isBluetoothEnabled');
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> requestEnableBluetooth() async {
+    try {
+      await _btMethod.invokeMethod('requestEnableBluetooth');
+    } catch (e) {
+      debugPrint('Error enabling bluetooth: $e');
+    }
+  }
+
   Future<void> scanBluetooth() async {
     _isBluetoothScanning = true;
+    _discoveredBluetoothDevices = [];
     notifyListeners();
-    await Future.delayed(const Duration(milliseconds: 1200));
-    _discoveredBluetoothDevices = [
-      {
-        'name': 'AstraDeck-PC-BT',
-        'address': '00:1A:7D:DA:71:13',
-        'paired': true,
-        'rssi': -58,
-      },
-    ];
+
+    try {
+      // 1. Check & request permissions
+      final hasPerm =
+          await _btMethod.invokeMethod<bool>('checkPermissions') ?? false;
+      if (!hasPerm) {
+        await _btMethod.invokeMethod('requestPermissions');
+      }
+
+      // 2. Check if Bluetooth is enabled
+      final isEnabled =
+          await _btMethod.invokeMethod<bool>('isBluetoothEnabled') ?? false;
+      if (!isEnabled) {
+        await _btMethod.invokeMethod('requestEnableBluetooth');
+        _isBluetoothScanning = false;
+        notifyListeners();
+        return;
+      }
+
+      // 3. Fetch bonded devices first
+      final bonded =
+          await _btMethod.invokeListMethod<dynamic>('getBondedDevices') ?? [];
+      for (final dev in bonded) {
+        if (dev is Map) {
+          final address = dev['address']?.toString() ?? '';
+          final name = dev['name']?.toString() ?? address;
+          if (address.isNotEmpty) {
+            _discoveredBluetoothDevices.add({
+              'name': name,
+              'address': address,
+              'bonded': true,
+            });
+          }
+        }
+      }
+      notifyListeners();
+
+      // 4. Start discovery for nearby unbonded devices
+      await _btMethod.invokeMethod('startDiscovery');
+    } catch (e) {
+      debugPrint('scanBluetooth error: $e');
+      _isBluetoothScanning = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> stopBluetoothScan() async {
+    try {
+      await _btMethod.invokeMethod('stopDiscovery');
+    } catch (_) {}
     _isBluetoothScanning = false;
     notifyListeners();
   }
 
+  Future<void> connectBluetooth(String address,
+      {String name = 'Bluetooth Device'}) async {
+    _btConnectingAddress = address;
+    _lastError = null;
+    notifyListeners();
+
+    try {
+      await _btMethod.invokeMethod('connect', {'address': address});
+    } catch (e) {
+      _btConnectingAddress = null;
+      _lastError = 'Failed to initiate BT connection: $e';
+      notifyListeners();
+    }
+  }
+
+  Future<void> disconnectBluetooth() async {
+    try {
+      await _btMethod.invokeMethod('disconnect');
+    } catch (_) {}
+    _isBtConnected = false;
+    _btConnectedAddress = null;
+    _btConnectingAddress = null;
+    _btPingTimer?.cancel();
+    notifyListeners();
+  }
+
+  void _startBtHeartbeat(int deviceIndex) {
+    _btPingTimer?.cancel();
+    _btPingTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (_isBtConnected) {
+        final now = DateTime.now().millisecondsSinceEpoch;
+        final payload =
+            jsonEncode({'action': 'ping', 'timestamp': now, 'id': now});
+        _btMethod.invokeMethod('sendData', {'data': payload});
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _btEventSub?.cancel();
+    _btPingTimer?.cancel();
+    disconnectBluetooth();
     stopLivePolling();
     _closeWs();
     super.dispose();

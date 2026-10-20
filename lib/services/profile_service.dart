@@ -25,6 +25,12 @@ class ProfileService extends ChangeNotifier {
   bool get canUndo => _undoHistory.isNotEmpty;
 
   DeckProfile get currentProfile {
+    if (_profiles.isEmpty) {
+      _profiles = StorageService.getDefaultProfiles();
+      _activeProfileId = _profiles.first.id;
+      _storage.saveProfiles(_profiles);
+      _storage.setActiveProfileId(_activeProfileId);
+    }
     return _profiles.firstWhere(
       (p) => p.id == _activeProfileId,
       orElse: () => _profiles.first,
@@ -166,9 +172,8 @@ class ProfileService extends ChangeNotifier {
   void reorderButtons(int oldIndex, int newIndex) {
     _saveSnapshot();
     final buttons = currentPage.buttons;
-    if (oldIndex < newIndex) {
-      newIndex -= 1;
-    }
+    // NOTE: onReorderItem already delivers the pre-adjusted newIndex —
+    // do NOT subtract 1 here (that was the old onReorder convention).
     final item = buttons.removeAt(oldIndex);
     buttons.insert(newIndex, item);
 

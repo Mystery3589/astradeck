@@ -3,25 +3,36 @@ import 'package:flutter/services.dart';
 import '../models/deck_models.dart';
 import '../models/app_settings.dart';
 import 'connection_service.dart';
-import 'obs_service.dart';
 
 class DeckExecutionService extends ChangeNotifier {
   final ConnectionService _connectionService;
-  final ObsService _obsService;
 
   double _systemVolume = 65.0;
   bool _isSystemMuted = false;
   double _screenBrightness = 80.0;
   bool _isMicMuted = false;
+  double _micVolume = 75.0;
 
   final List<String> _activityLogs = [];
 
-  DeckExecutionService(this._connectionService, this._obsService);
+  DeckExecutionService(this._connectionService) {
+    // When server pushes state after auth, sync the sliders immediately
+    _connectionService.onSystemState = (vol, brightness) {
+      if (vol != null) {
+        _systemVolume = vol.clamp(0.0, 100.0);
+      }
+      if (brightness != null) {
+        _screenBrightness = brightness.clamp(0.0, 100.0);
+      }
+      notifyListeners();
+    };
+  }
 
   double get systemVolume => _systemVolume;
   bool get isSystemMuted => _isSystemMuted;
   double get screenBrightness => _screenBrightness;
   bool get isMicMuted => _isMicMuted;
+  double get micVolume => _micVolume;
   List<String> get activityLogs => List.unmodifiable(_activityLogs);
 
   void setSystemVolume(double val) {
@@ -59,9 +70,15 @@ class DeckExecutionService extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setMicVolume(double val) {
+    _micVolume = val.clamp(0.0, 100.0);
+    _log('Mic volume set to ${_micVolume.round()}%');
+    _connectionService.sendAction('set_mic_volume', {'volume': _micVolume.round()});
+    notifyListeners();
+  }
+
   void toggleMicMute() {
     _isMicMuted = !_isMicMuted;
-    _obsService.toggleMicMute();
     _log('Microphone mute toggled: $_isMicMuted');
     _connectionService.sendAction('toggle_mic_mute', {});
     notifyListeners();
@@ -108,16 +125,8 @@ class DeckExecutionService extends ChangeNotifier {
         return true;
 
       case ActionType.obsAction:
-        final cmd = button.actionPayload['command'] ?? '';
-        if (cmd == 'toggle_stream') {
-          _obsService.toggleStream();
-        } else if (cmd == 'toggle_record') {
-          _obsService.toggleRecord();
-        } else if (cmd == 'switch_scene') {
-          _obsService.setScene(button.actionPayload['scene'] ?? '');
-        }
-        _log('Dispatched OBS command: $cmd');
-        _connectionService.sendAction('launch_app', {'app': 'obs'});
+        _log('Opening OBS Studio');
+        _connectionService.sendAction('launch_app', {'app': 'OBS Studio'});
         return true;
 
       case ActionType.switchPage:
@@ -126,7 +135,46 @@ class DeckExecutionService extends ChangeNotifier {
         return true;
 
       case ActionType.actionSequence:
-        _log('Executed action sequence payload');
+        final seq = button.actionPayload['sequence'];
+        String? mediaCmd = button.actionPayload['media_command'] as String?;
+        if (mediaCmd == null && seq is List && seq.isNotEmpty) {
+          final first = seq[0].toString().toLowerCase();
+          if (first.contains('toggle') || first.contains('play')) {
+            mediaCmd = 'play_pause';
+          } else if (first.contains('prev')) {
+            mediaCmd = 'previous';
+          } else if (first.contains('next')) {
+            mediaCmd = 'next';
+          }
+        }
+        // Fallback check by button title or ID
+        if (mediaCmd == null) {
+          final titleLower = button.title.toLowerCase();
+          if (titleLower.contains('play') || titleLower.contains('pause')) {
+            mediaCmd = 'play_pause';
+          } else if (titleLower.contains('prev')) {
+            mediaCmd = 'previous';
+          } else if (titleLower.contains('next')) {
+            mediaCmd = 'next';
+          }
+        }
+
+        if (mediaCmd != null) {
+          _log('Dispatched media control: $mediaCmd');
+          _connectionService.sendAction('media_control', {'command': mediaCmd});
+        } else {
+          _log('Executed action sequence payload');
+        }
+        return true;
+
+      case ActionType.dynamicFunction:
+        final funcId = button.actionPayload['function_id'] ?? '';
+        final cmd = button.actionPayload['command'] ?? button.actionPayload['definition'] ?? '';
+        _log('Executing dynamic custom function "${button.title}"');
+        _connectionService.sendAction('execute_function', {
+          'function_id': funcId,
+          'command': cmd,
+        });
         return true;
     }
   }

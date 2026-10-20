@@ -7,7 +7,6 @@ import 'screens/settings/settings_dashboard_screen.dart';
 import 'services/storage_service.dart';
 import 'services/settings_service.dart';
 import 'services/connection_service.dart';
-import 'services/obs_service.dart';
 import 'services/deck_execution_service.dart';
 import 'services/profile_service.dart';
 import 'theme/astradeck_theme.dart';
@@ -30,10 +29,9 @@ class AstraDeckApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => SettingsService(storageService)),
         ChangeNotifierProvider(create: (_) => ConnectionService(storageService)),
-        ChangeNotifierProvider(create: (_) => ObsService(storageService)),
-        ChangeNotifierProxyProvider2<ConnectionService, ObsService, DeckExecutionService>(
-          create: (ctx) => DeckExecutionService(ctx.read<ConnectionService>(), ctx.read<ObsService>()),
-          update: (ctx, conn, obs, prev) => prev ?? DeckExecutionService(conn, obs),
+        ChangeNotifierProxyProvider<ConnectionService, DeckExecutionService>(
+          create: (ctx) => DeckExecutionService(ctx.read<ConnectionService>()),
+          update: (ctx, conn, prev) => prev ?? DeckExecutionService(conn),
         ),
         ChangeNotifierProvider(create: (_) => ProfileService(storageService)),
       ],

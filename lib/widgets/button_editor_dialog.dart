@@ -55,11 +55,13 @@ class _ButtonEditorDialogState extends State<ButtonEditorDialog> {
 
     String defaultPayload = '';
     if (widget.button.actionPayload.containsKey('url')) {
-      defaultPayload = widget.button.actionPayload['url'];
+      defaultPayload = widget.button.actionPayload['url'] ?? '';
     } else if (widget.button.actionPayload.containsKey('app')) {
-      defaultPayload = widget.button.actionPayload['app'];
+      defaultPayload = widget.button.actionPayload['app'] ?? '';
+    } else if (widget.button.actionPayload.containsKey('definition')) {
+      defaultPayload = widget.button.actionPayload['definition'] ?? '';
     } else if (widget.button.actionPayload.containsKey('command')) {
-      defaultPayload = widget.button.actionPayload['command'];
+      defaultPayload = widget.button.actionPayload['command'] ?? '';
     }
     _payloadController = TextEditingController(text: defaultPayload);
 
@@ -88,6 +90,13 @@ class _ButtonEditorDialogState extends State<ButtonEditorDialog> {
       payload['url'] = _payloadController.text.trim();
     } else if (_actionType == ActionType.launchApp) {
       payload['app'] = _payloadController.text.trim();
+    } else if (_actionType == ActionType.dynamicFunction) {
+      final text = _payloadController.text.trim();
+      payload['definition'] = text;
+      payload['command'] = text;
+      if (widget.button.actionPayload.containsKey('function_id')) {
+        payload['function_id'] = widget.button.actionPayload['function_id'];
+      }
     } else if (_actionType == ActionType.obsAction) {
       payload['command'] = _payloadController.text.trim().isNotEmpty
           ? _payloadController.text.trim()
@@ -232,7 +241,9 @@ class _ButtonEditorDialogState extends State<ButtonEditorDialog> {
                       fillColor: Color(0xFF0F172A),
                       border: OutlineInputBorder(),
                     ),
-                    items: ActionType.values.map((type) {
+                    items: ActionType.values
+                        .where((type) => type != ActionType.obsAction)
+                        .map((type) {
                       return DropdownMenuItem(
                         value: type,
                         child: Text(type.displayName),
@@ -263,10 +274,28 @@ class _ButtonEditorDialogState extends State<ButtonEditorDialog> {
                       filled: true,
                       fillColor: const Color(0xFF0F172A),
                       border: const OutlineInputBorder(),
-                      helperText: 'Validated allowlisted execution target',
+                      helperText: _getPayloadHelper(),
+                      helperMaxLines: 2,
                       helperStyle: const TextStyle(color: Color(0xFF64748B)),
                     ),
                   ),
+                  if (_actionType == ActionType.dynamicFunction) ...[
+                    const SizedBox(height: 8),
+                    const Text('Quick Desired Actions:', style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _buildQuickActionChip('Lock Screen', 'lock screen', 'lock'),
+                        _buildQuickActionChip('Window Screenshot', 'take screenshot of active window', 'camera_alt'),
+                        _buildQuickActionChip('Toggle Night Light', 'toggle dark mode night light', 'nightlight'),
+                        _buildQuickActionChip('Switch Audio', 'switch audio output', 'headset'),
+                        _buildQuickActionChip('Open Terminal', 'open terminal', 'terminal'),
+                        _buildQuickActionChip('Empty Trash', 'empty trash and clean cache', 'delete'),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 16),
 
                   // Icon Picker
@@ -412,12 +441,31 @@ class _ButtonEditorDialogState extends State<ButtonEditorDialog> {
     );
   }
 
+  Widget _buildQuickActionChip(String label, String actionDef, String icon) {
+    return ActionChip(
+      label: Text(label, style: const TextStyle(fontSize: 11, color: Colors.white)),
+      backgroundColor: const Color(0xFF334155),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      onPressed: () {
+        setState(() {
+          _payloadController.text = actionDef;
+          if (_titleController.text.isEmpty || _titleController.text == 'Action Button') {
+            _titleController.text = label;
+          }
+          _iconName = icon;
+        });
+      },
+    );
+  }
+
   String _getPayloadLabel() {
     switch (_actionType) {
       case ActionType.openWebsite:
         return 'Target URL (https://...)';
       case ActionType.launchApp:
-        return 'Desktop App Name (e.g. Chrome, Spotify)';
+        return 'Desktop App Name (e.g. OBS Studio, Discord, Chrome)';
+      case ActionType.dynamicFunction:
+        return 'Desired Action / Intent (e.g. "Lock screen", command)';
       case ActionType.obsAction:
         return 'OBS Command (toggle_stream, switch_scene)';
       case ActionType.setVolume:
@@ -426,6 +474,19 @@ class _ButtonEditorDialogState extends State<ButtonEditorDialog> {
         return 'Brightness Delta (+/- 10)';
       default:
         return 'Action Parameter';
+    }
+  }
+
+  String _getPayloadHelper() {
+    switch (_actionType) {
+      case ActionType.launchApp:
+        return 'Opens native app (if open, nothing happens); opens in browser if not installed.';
+      case ActionType.openWebsite:
+        return 'Opens in default browser (reopens every time clicked).';
+      case ActionType.dynamicFunction:
+        return 'AstraDeck dynamically creates and executes a function on PC for this action.';
+      default:
+        return 'Validated execution parameter';
     }
   }
 }

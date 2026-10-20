@@ -77,12 +77,16 @@ class ProfilesScreen extends StatelessWidget {
                           children: [
                             Row(
                               children: [
-                                Text(
-                                  profile.name,
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
+                                Flexible(
+                                  child: Text(
+                                    profile.name,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
                                   ),
                                 ),
                                 if (isActive) ...[
@@ -109,6 +113,8 @@ class ProfilesScreen extends StatelessWidget {
                               Text(
                                 profile.description,
                                 style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 2,
                               ),
                           ],
                         ),
@@ -143,31 +149,38 @@ class ProfilesScreen extends StatelessWidget {
                   const SizedBox(height: 12),
                   const Divider(color: Color(0xFF334155), height: 1),
                   const SizedBox(height: 12),
-                  Row(
+                  Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
+                    runSpacing: 8,
                     children: [
                       Text(
                         'Grid: ${profile.gridRows}×${profile.gridCols} • ${profile.pages.length} Pages • ${profile.pages.fold<int>(0, (sum, p) => sum + p.buttons.length)} Buttons',
                         style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
                       ),
-                      const Spacer(),
                       if (!isActive)
                         OutlinedButton(
                           style: OutlinedButton.styleFrom(
                             foregroundColor: Colors.white,
                             side: const BorderSide(color: Colors.white38),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
                           onPressed: () => profileService.setActiveProfile(profile.id),
-                          child: const Text('Switch Profile'),
+                          child: const Text('Switch'),
                         )
                       else
                         ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
                             backgroundColor: settingsService.settings.accentColor,
                             foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
-                          onPressed: () {
-                            // Already active
-                          },
+                          onPressed: () {},
                           icon: const Icon(Icons.check, size: 16),
                           label: const Text('In Use'),
                         ),
@@ -237,8 +250,10 @@ class ProfilesScreen extends StatelessWidget {
             TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
             ElevatedButton(
               onPressed: () {
-                if (nameCtrl.text.isNotEmpty) {
-                  service.createProfile(nameCtrl.text.trim(), description: descCtrl.text.trim(), rows: rows, cols: cols);
+                final name = nameCtrl.text.trim();
+                final desc = descCtrl.text.trim();
+                if (name.isNotEmpty) {
+                  service.createProfile(name, description: desc, rows: rows, cols: cols);
                   Navigator.of(ctx).pop();
                 }
               },
@@ -247,7 +262,10 @@ class ProfilesScreen extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ).then((_) {
+      nameCtrl.dispose();
+      descCtrl.dispose();
+    });
   }
 
   void _showRenameDialog(BuildContext context, ProfileService service, DeckProfile profile) {
@@ -271,14 +289,19 @@ class ProfilesScreen extends StatelessWidget {
           TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () {
-              service.renameProfile(profile.id, nameCtrl.text.trim(), descCtrl.text.trim());
+              final name = nameCtrl.text.trim();
+              final desc = descCtrl.text.trim();
               Navigator.of(ctx).pop();
+              service.renameProfile(profile.id, name, desc);
             },
             child: const Text('Save'),
           ),
         ],
       ),
-    );
+    ).then((_) {
+      nameCtrl.dispose();
+      descCtrl.dispose();
+    });
   }
 
   void _exportProfile(BuildContext context, ProfileService service, DeckProfile profile) {
@@ -311,7 +334,8 @@ class ProfilesScreen extends StatelessWidget {
           TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () {
-              final ok = service.importProfileFromJson(jsonCtrl.text.trim());
+              final jsonText = jsonCtrl.text.trim();
+              final ok = service.importProfileFromJson(jsonText);
               Navigator.of(ctx).pop();
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
@@ -324,7 +348,7 @@ class ProfilesScreen extends StatelessWidget {
           ),
         ],
       ),
-    );
+    ).then((_) => jsonCtrl.dispose());
   }
 
   void _confirmDelete(BuildContext context, ProfileService service, DeckProfile profile) {

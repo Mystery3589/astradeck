@@ -5,7 +5,6 @@ import '../../services/connection_service.dart';
 import '../../services/settings_service.dart';
 import '../../services/profile_service.dart';
 import '../../services/deck_execution_service.dart';
-import '../../services/obs_service.dart';
 
 class SettingsDashboardScreen extends StatefulWidget {
   const SettingsDashboardScreen({super.key});
@@ -29,7 +28,6 @@ class _SettingsDashboardScreenState extends State<SettingsDashboardScreen> {
     final settingsService = context.watch<SettingsService>();
     final connectionService = context.watch<ConnectionService>();
     final profileService = context.watch<ProfileService>();
-    final obsService = context.watch<ObsService>();
     final executionService = context.watch<DeckExecutionService>();
 
     final categories = [
@@ -74,14 +72,6 @@ class _SettingsDashboardScreenState extends State<SettingsDashboardScreen> {
         onTap: () => _openCategory(context, _buildAudioBrightnessSettings(context, settingsService, executionService)),
       ),
       _SettingCategory(
-        id: 'obs',
-        title: 'OBS Studio',
-        subtitle: 'WebSocket v5 host, port, safe credentials, scenes & mic sources',
-        icon: Icons.videocam,
-        color: Colors.redAccent,
-        onTap: () => _openCategory(context, _buildObsSettings(context, obsService)),
-      ),
-      _SettingCategory(
         id: 'profiles_backup',
         title: 'Profiles & Backup',
         subtitle: 'Import/export JSON schemas, switch defaults, restore presets',
@@ -119,7 +109,7 @@ class _SettingsDashboardScreenState extends State<SettingsDashboardScreen> {
         subtitle: 'AstraDeck v2.4.0, latency benchmark, hardware tests & export report',
         icon: Icons.info,
         color: Colors.deepPurpleAccent,
-        onTap: () => _openCategory(context, _buildDiagnosticsSettings(context, connectionService, executionService, obsService)),
+        onTap: () => _openCategory(context, _buildDiagnosticsSettings(context, connectionService, executionService)),
       ),
     ];
 
@@ -185,7 +175,7 @@ class _SettingsDashboardScreenState extends State<SettingsDashboardScreen> {
               controller: _searchController,
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
-                hintText: 'Search preferences (e.g. OBS, audio, wifi, theme)...',
+                hintText: 'Search preferences (e.g. audio, wifi, theme, custom actions)...',
                 hintStyle: const TextStyle(color: Color(0xFF64748B)),
                 prefixIcon: const Icon(Icons.search, color: Color(0xFF94A3B8)),
                 suffixIcon: _searchQuery.isNotEmpty
@@ -309,7 +299,7 @@ class _SettingsDashboardScreenState extends State<SettingsDashboardScreen> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: (active?.supportedFeatures ?? ['volume_control', 'brightness_control', 'mic_mute', 'app_launch', 'obs_control'])
+            children: (active?.supportedFeatures ?? ['volume_control', 'brightness_control', 'mic_mute', 'app_launch', 'custom_functions'])
                 .map((f) => Chip(
                       label: Text(f),
                       avatar: const Icon(Icons.check_circle, color: Color(0xFF10B981), size: 16),
@@ -619,86 +609,6 @@ class _SettingsDashboardScreenState extends State<SettingsDashboardScreen> {
     );
   }
 
-  // 6. OBS Studio
-  Widget _buildObsSettings(BuildContext context, ObsService obs) {
-    final hostCtrl = TextEditingController(text: obs.config.host);
-    final portCtrl = TextEditingController(text: obs.config.port.toString());
-    final passCtrl = TextEditingController(text: obs.config.password);
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('OBS Studio WebSocket v5')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          SwitchListTile(
-            title: const Text('Enable OBS Studio Integration'),
-            subtitle: const Text('Allows AstraDeck to trigger scenes, mute audio & toggle streams'),
-            value: obs.config.isEnabled,
-            onChanged: (v) => obs.updateSettings(isEnabled: v),
-          ),
-          const SizedBox(height: 16),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  TextField(controller: hostCtrl, decoration: const InputDecoration(labelText: 'OBS Host IP')),
-                  const SizedBox(height: 12),
-                  TextField(controller: portCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'WebSocket Port (Default 4455)')),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: passCtrl,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Server Password (Encrypted locally, redacted from logs)',
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      ElevatedButton(
-                        onPressed: () {
-                          obs.updateSettings(
-                            host: hostCtrl.text.trim(),
-                            port: int.tryParse(portCtrl.text) ?? 4455,
-                            password: passCtrl.text,
-                          );
-                          obs.connect();
-                        },
-                        child: Text(obs.config.isConnected ? 'Reconnect OBS' : 'Connect OBS'),
-                      ),
-                      const SizedBox(width: 12),
-                      OutlinedButton(
-                        onPressed: () async {
-                          final ok = await obs.testConnection();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(ok ? 'OBS WebSocket Ping OK!' : 'Failed to reach OBS')),
-                          );
-                        },
-                        child: const Text('Test Connection'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-          const Text('Available Scenes in OBS', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          ...obs.config.availableScenes.map((scene) {
-            final isCurrent = obs.config.currentScene == scene;
-            return ListTile(
-              leading: Icon(Icons.movie_creation, color: isCurrent ? Colors.redAccent : Colors.white70),
-              title: Text(scene),
-              trailing: isCurrent ? const Chip(label: Text('ACTIVE SCENE')) : null,
-              onTap: () => obs.setScene(scene),
-            );
-          }),
-        ],
-      ),
-    );
-  }
 
   // 7. Profiles & Backup
   Widget _buildProfilesBackupSettings(BuildContext context, ProfileService profileService) {
@@ -837,7 +747,7 @@ class _SettingsDashboardScreenState extends State<SettingsDashboardScreen> {
   }
 
   // 11. About & Diagnostics
-  Widget _buildDiagnosticsSettings(BuildContext context, ConnectionService conn, DeckExecutionService exec, ObsService obs) {
+  Widget _buildDiagnosticsSettings(BuildContext context, ConnectionService conn, DeckExecutionService exec) {
     final dev = conn.activeDevice;
 
     return Scaffold(
@@ -857,7 +767,6 @@ class _SettingsDashboardScreenState extends State<SettingsDashboardScreen> {
                   _rowItem('Desktop Agent', dev?.agentVersion ?? 'Not linked'),
                   _rowItem('Active Transport', dev?.transport.name.toUpperCase() ?? 'NONE'),
                   _rowItem('Link Latency', '${dev?.latencyMs ?? 0} ms'),
-                  _rowItem('OBS WebSocket', obs.config.isConnected ? 'Connected' : 'Disconnected'),
                 ],
               ),
             ),
@@ -872,6 +781,7 @@ class _SettingsDashboardScreenState extends State<SettingsDashboardScreen> {
               onPressed: () async {
                 if (dev != null) {
                   final ms = await conn.testConnection(dev);
+                  if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Diagnostic Latency: ${ms}ms')));
                 }
               },
@@ -905,7 +815,6 @@ Connected Host: ${dev?.name ?? "None"}
 OS: ${dev?.operatingSystem ?? "N/A"}
 Transport: ${dev?.transport.name ?? "None"}
 Latency: ${dev?.latencyMs ?? 0}ms
-OBS Status: ${obs.config.isConnected ? "Active" : "Inactive"}
 Timestamp: ${DateTime.now().toIso8601String()}
 Logs: [REDACTED FOR PRIVACY]
 ====================================''';
@@ -950,6 +859,7 @@ Logs: [REDACTED FOR PRIVACY]
               Navigator.of(ctx).pop();
               await settings.resetToDefaults();
               conn.disconnectAll();
+              if (!context.mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Factory reset complete!')),
               );

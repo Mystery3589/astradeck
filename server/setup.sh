@@ -9,7 +9,7 @@
 set -e
 
 # Configurable GitHub repository source
-GITHUB_REPO="${ASTRADECK_REPO:-mystery/OneClick}"
+GITHUB_REPO="${ASTRADECK_REPO:-Mystery3589/astradeck}"
 GITHUB_BRANCH="${ASTRADECK_BRANCH:-main}"
 RAW_BASE="https://raw.githubusercontent.com/$GITHUB_REPO/$GITHUB_BRANCH/server"
 
@@ -71,6 +71,8 @@ After=network.target
 Type=simple
 WorkingDirectory=$INSTALL_DIR
 ExecStart=$PYTHON_BIN $INSTALL_DIR/astradeck_agent.py
+Environment="PYTHONUNBUFFERED=1"
+Environment="PATH=/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 Restart=always
 RestartSec=3
 
@@ -80,8 +82,9 @@ EOF
 
     systemctl --user daemon-reload
     systemctl --user enable --now astradeck.service
+    loginctl enable-linger "$USER" 2>/dev/null || true
     echo "[+] AstraDeck background service successfully configured & started!"
-    echo "    (Auto-starts on boot/login. No terminal window needed)"
+    echo "    (Auto-starts on boot/login. Runs all backend services silently)"
 
 elif [ "$OS_TYPE" = "Darwin" ]; then
     echo "[*] Configuring macOS LaunchAgent..."

@@ -4,7 +4,7 @@
 #   irm https://raw.githubusercontent.com/<user>/<repo>/main/server/setup.ps1 | iex
 # ==============================================================================
 
-$Repo = if ($env:ASTRADECK_REPO) { $env:ASTRADECK_REPO } else { "mystery/OneClick" }
+$Repo = if ($env:ASTRADECK_REPO) { $env:ASTRADECK_REPO } else { "Mystery3589/astradeck" }
 $Branch = if ($env:ASTRADECK_BRANCH) { $env:ASTRADECK_BRANCH } else { "main" }
 $RawBase = "https://raw.githubusercontent.com/$Repo/$Branch/server"
 $InstallDir = "$env:USERPROFILE\.astradeck\server"

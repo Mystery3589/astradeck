@@ -27,24 +27,26 @@ class _ConnectPcModalState extends State<ConnectPcModal>
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
 
+  late ConnectionService _connectionService;
+
   final List<Map<String, String>> _osCommands = [
     {
       'os': 'Linux',
       'icon': '🐧',
       'desc': 'Downloads companion & installs auto-start systemd service (zero files needed!).',
-      'cmd': 'curl -sSL https://raw.githubusercontent.com/mystery/OneClick/main/server/setup.sh | bash',
+      'cmd': 'curl -sSL https://raw.githubusercontent.com/Mystery3589/astradeck/main/server/setup.sh | bash',
     },
     {
       'os': 'Windows',
       'icon': '🪟',
       'desc': 'Paste in PowerShell: downloads companion & configures silent auto-start.',
-      'cmd': 'irm https://raw.githubusercontent.com/mystery/OneClick/main/server/setup.ps1 | iex',
+      'cmd': 'irm https://raw.githubusercontent.com/Mystery3589/astradeck/main/server/setup.ps1 | iex',
     },
     {
       'os': 'macOS',
       'icon': '🍏',
       'desc': 'Downloads companion & installs auto-start LaunchAgent.',
-      'cmd': 'curl -sSL https://raw.githubusercontent.com/mystery/OneClick/main/server/setup.sh | bash',
+      'cmd': 'curl -sSL https://raw.githubusercontent.com/Mystery3589/astradeck/main/server/setup.sh | bash',
     },
   ];
 
@@ -59,34 +61,28 @@ class _ConnectPcModalState extends State<ConnectPcModal>
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
 
-    // Start live poller while modal is open
+    // If not connected, start polling to detect companion; do NOT auto-dismiss abruptly if already connected
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final conn = context.read<ConnectionService>();
-      conn.startLivePolling(onConnected: () {
-        if (mounted) {
-          Navigator.of(context).pop();
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              backgroundColor: const Color(0xFF10B981),
-              content: Row(
-                children: [
-                  const Icon(Icons.check_circle, color: Colors.white),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Connected to ${conn.activeDevice?.name ?? "PC"}!',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
-      });
+      if (!mounted) return;
+      if (!_connectionService.isConnected) {
+        _connectionService.startLivePolling(onConnected: () {
+          if (mounted) {
+            setState(() {});
+          }
+        });
+      }
     });
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _connectionService = context.read<ConnectionService>();
+  }
+
+  @override
   void dispose() {
+    _connectionService.stopLivePolling();
     _pulseController.dispose();
     super.dispose();
   }
@@ -97,6 +93,7 @@ class _ConnectPcModalState extends State<ConnectPcModal>
     final settingsService = context.watch<SettingsService>();
     final accent = settingsService.settings.accentColor;
     final currentOs = _osCommands[_selectedOsIndex];
+    final isConnected = connectionService.isConnected;
 
     return Container(
       decoration: const BoxDecoration(
@@ -127,19 +124,23 @@ class _ConnectPcModalState extends State<ConnectPcModal>
             ),
             const SizedBox(height: 16),
 
-            // Header with pulsing radar
+            // Header
             Row(
               children: [
                 ScaleTransition(
-                  scale: _pulseAnimation,
+                  scale: isConnected ? const AlwaysStoppedAnimation(1.0) : _pulseAnimation,
                   child: Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: accent.withValues(alpha: 0.15),
-                      border: Border.all(color: accent, width: 1.5),
+                      color: (isConnected ? const Color(0xFF10B981) : accent).withValues(alpha: 0.15),
+                      border: Border.all(color: isConnected ? const Color(0xFF10B981) : accent, width: 1.5),
                     ),
-                    child: Icon(Icons.radar, color: accent, size: 24),
+                    child: Icon(
+                      isConnected ? Icons.check_circle : Icons.radar,
+                      color: isConnected ? const Color(0xFF10B981) : accent,
+                      size: 24,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -148,7 +149,7 @@ class _ConnectPcModalState extends State<ConnectPcModal>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Connect to this PC',
+                        'PC Companion Setup',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
@@ -156,15 +157,17 @@ class _ConnectPcModalState extends State<ConnectPcModal>
                         ),
                       ),
                       Text(
-                        connectionService.isConnected
-                            ? 'Server detected! Connecting...'
+                        isConnected
+                            ? 'Connected to ${connectionService.activeDevice?.name ?? "PC"} (${connectionService.activeDevice?.latencyMs ?? 0}ms)'
                             : 'Scanning USB, Wi-Fi, & Bluetooth...',
                         style: TextStyle(
                           fontSize: 12,
-                          color: connectionService.isConnected
+                          color: isConnected
                               ? const Color(0xFF10B981)
                               : const Color(0xFF94A3B8),
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
@@ -242,28 +245,41 @@ class _ConnectPcModalState extends State<ConnectPcModal>
             const SizedBox(height: 8),
 
             // OS Tabs
-            Row(
-              children: List.generate(_osCommands.length, (idx) {
-                final item = _osCommands[idx];
-                final isSelected = _selectedOsIndex == idx;
-                return Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.only(right: idx < 2 ? 8 : 0),
-                    child: ChoiceChip(
-                      label: Text('${item['icon']} ${item['os']}'),
-                      selected: isSelected,
-                      selectedColor: accent,
-                      backgroundColor: const Color(0xFF0F172A),
-                      labelStyle: TextStyle(
-                        color: isSelected ? Colors.white : const Color(0xFF94A3B8),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
+            Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F172A),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.all(4),
+              child: Row(
+                children: List.generate(_osCommands.length, (idx) {
+                  final item = _osCommands[idx];
+                  final isSelected = _selectedOsIndex == idx;
+                  return Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _selectedOsIndex = idx),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isSelected ? accent : Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          '${item['icon']} ${item['os']}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            color: isSelected ? Colors.white : const Color(0xFF94A3B8),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                      onSelected: (_) => setState(() => _selectedOsIndex = idx),
                     ),
-                  ),
-                );
-              }),
+                  );
+                }),
+              ),
             ),
 
             const SizedBox(height: 10),

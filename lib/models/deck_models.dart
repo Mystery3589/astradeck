@@ -9,6 +9,7 @@ enum ActionType {
   switchPage,
   switchProfile,
   actionSequence,
+  dynamicFunction,
 }
 
 extension ActionTypeExtension on ActionType {
@@ -34,6 +35,8 @@ extension ActionTypeExtension on ActionType {
         return 'Switch Profile';
       case ActionType.actionSequence:
         return 'Execute Action Sequence';
+      case ActionType.dynamicFunction:
+        return 'Custom Action (Auto-Created)';
     }
   }
 

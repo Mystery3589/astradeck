@@ -37,15 +37,20 @@ class DeckScreen extends StatelessWidget {
               child: Icon(Icons.dashboard_customize, color: settingsService.settings.accentColor, size: 20),
             ),
             const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('AstraDeck', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                Text(
-                  '${profile.name} • ${page.name}',
-                  style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
-                ),
-              ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('AstraDeck', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                  Text(
+                    '${profile.name} • ${page.name}',
+                    style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -69,7 +74,14 @@ class DeckScreen extends StatelessWidget {
                   );
                 }
               } else {
-                ConnectPcModal.show(context);
+                final dev = connectionService.activeDevice;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Connected to ${dev?.name ?? "PC"} (${dev?.ipAddress}:${dev?.port}) • ${dev?.latencyMs ?? 0}ms latency',
+                    ),
+                  ),
+                );
               }
             },
             child: Container(
@@ -169,14 +181,72 @@ class DeckScreen extends StatelessWidget {
               ),
             ),
 
+          // Waiting for PC Companion / Auto-Reconnect Banner
+          if (connectionService.isWaitingForHost)
+            Container(
+              margin: const EdgeInsets.fromLTRB(16, 6, 16, 2),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEF4444).withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: const Color(0xFFEF4444).withValues(alpha: 0.3),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Color(0xFFEF4444),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Waiting for PC companion to start...',
+                      style: TextStyle(
+                        color: Color(0xFFFCA5A5),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () => ConnectPcModal.show(context),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEF4444).withValues(alpha: 0.25),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        'Setup Guide',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           // Quick Volume & Brightness Control Sliders
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
             child: Row(
               children: [
                 Expanded(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     decoration: BoxDecoration(
                       color: const Color(0xFF1E293B),
                       borderRadius: BorderRadius.circular(12),
@@ -189,58 +259,136 @@ class DeckScreen extends StatelessWidget {
                           icon: Icon(
                             executionService.isSystemMuted ? Icons.volume_off : Icons.volume_up,
                             color: executionService.isSystemMuted ? Colors.redAccent : Colors.white70,
-                            size: 18,
+                            size: 16,
                           ),
                           onPressed: () => executionService.toggleSystemMute(),
                         ),
                         Expanded(
-                          child: Slider(
-                            value: executionService.systemVolume,
-                            min: 0,
-                            max: 100,
-                            activeColor: settingsService.settings.accentColor,
-                            inactiveColor: Colors.white24,
-                            onChanged: (val) => executionService.setSystemVolume(val),
+                          child: SliderTheme(
+                            data: SliderTheme.of(context).copyWith(
+                              trackHeight: 2.5,
+                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                              overlayShape: const RoundSliderOverlayShape(overlayRadius: 8),
+                            ),
+                            child: Slider(
+                              value: executionService.systemVolume,
+                              min: 0,
+                              max: 100,
+                              activeColor: settingsService.settings.accentColor,
+                              inactiveColor: Colors.white24,
+                              onChanged: (val) => executionService.setSystemVolume(val),
+                            ),
                           ),
                         ),
                         Text(
                           '${executionService.systemVolume.round()}%',
-                          style: const TextStyle(fontSize: 11, color: Colors.white70, fontWeight: FontWeight.bold),
+                          style: const TextStyle(fontSize: 10, color: Colors.white70, fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
+                // Brightness slider
                 Expanded(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     decoration: BoxDecoration(
                       color: const Color(0xFF1E293B),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.brightness_medium, color: Colors.amber, size: 18),
+                        const Icon(Icons.brightness_medium, color: Colors.amber, size: 16),
                         Expanded(
-                          child: Slider(
-                            value: executionService.screenBrightness,
-                            min: 0,
-                            max: 100,
-                            activeColor: Colors.amber,
-                            inactiveColor: Colors.white24,
-                            onChanged: (val) => executionService.setBrightness(val),
+                          child: SliderTheme(
+                            data: SliderTheme.of(context).copyWith(
+                              trackHeight: 2.5,
+                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                              overlayShape: const RoundSliderOverlayShape(overlayRadius: 8),
+                            ),
+                            child: Slider(
+                              value: executionService.screenBrightness,
+                              min: 0,
+                              max: 100,
+                              activeColor: Colors.amber,
+                              inactiveColor: Colors.white24,
+                              onChanged: (val) => executionService.setBrightness(val),
+                            ),
                           ),
                         ),
                         Text(
                           '${executionService.screenBrightness.round()}%',
-                          style: const TextStyle(fontSize: 11, color: Colors.white70, fontWeight: FontWeight.bold),
+                          style: const TextStyle(fontSize: 10, color: Colors.white70, fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
                   ),
                 ),
               ],
+            ),
+          ),
+
+          // Mic Controls Row
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: executionService.isMicMuted
+                      ? Colors.redAccent.withValues(alpha: 0.5)
+                      : Colors.transparent,
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    icon: Icon(
+                      executionService.isMicMuted ? Icons.mic_off : Icons.mic,
+                      color: executionService.isMicMuted ? Colors.redAccent : const Color(0xFF34D399),
+                      size: 16,
+                    ),
+                    onPressed: () => executionService.toggleMicMute(),
+                  ),
+                  Expanded(
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 2.5,
+                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                        overlayShape: const RoundSliderOverlayShape(overlayRadius: 8),
+                      ),
+                      child: Slider(
+                        value: executionService.micVolume,
+                        min: 0,
+                        max: 100,
+                        activeColor: executionService.isMicMuted
+                            ? Colors.redAccent
+                            : const Color(0xFF34D399),
+                        inactiveColor: Colors.white24,
+                        onChanged: executionService.isMicMuted
+                            ? null
+                            : (val) => executionService.setMicVolume(val),
+                      ),
+                    ),
+                  ),
+                  Text(
+                    executionService.isMicMuted
+                        ? 'MUTED'
+                        : '${executionService.micVolume.round()}%',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: executionService.isMicMuted ? Colors.redAccent : Colors.white70,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
 
@@ -315,7 +463,7 @@ class DeckScreen extends StatelessWidget {
       return ReorderableListView(
         scrollDirection: Axis.vertical,
         padding: EdgeInsets.zero,
-        onReorder: (oldIndex, newIndex) => profileService.reorderButtons(oldIndex, newIndex),
+        onReorderItem: (oldIndex, newIndex) => profileService.reorderButtons(oldIndex, newIndex),
         children: [
           for (int i = 0; i < page.buttons.length; i++)
             Container(
@@ -555,13 +703,14 @@ class DeckScreen extends StatelessWidget {
           TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () {
-              profileService.addPage(controller.text.trim());
+              final pageName = controller.text.trim();
               Navigator.of(ctx).pop();
+              profileService.addPage(pageName);
             },
             child: const Text('Add Page'),
           ),
         ],
       ),
-    );
+    ).then((_) => controller.dispose());
   }
 }

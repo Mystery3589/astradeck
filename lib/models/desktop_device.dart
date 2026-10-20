@@ -54,7 +54,7 @@ class DesktopDevice {
           'brightness_control',
           'mic_mute',
           'app_launch',
-          'obs_control',
+          'custom_functions',
           'system_mute',
         ],
         availableApps = availableApps ?? [
@@ -151,7 +151,7 @@ class DesktopDevice {
       supportedFeatures: (json['supportedFeatures'] as List<dynamic>?)
               ?.map((e) => e.toString())
               .toList() ??
-          ['volume_control', 'brightness_control', 'mic_mute', 'app_launch', 'obs_control'],
+          ['volume_control', 'brightness_control', 'mic_mute', 'app_launch', 'custom_functions'],
       availableApps: (json['availableApps'] as List<dynamic>?)
               ?.map((e) => e.toString())
               .toList() ??
