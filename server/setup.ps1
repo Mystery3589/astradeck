@@ -1,5 +1,6 @@
 param (
-    [switch]$Adb = $false
+    [switch]$Adb   = $false,
+    [switch]$Force = $false
 )
 
 if ($env:ASTRADECK_ADB -eq "1" -or $env:SETUP_ADB -eq "1") {
@@ -12,10 +13,37 @@ $RawBase = "https://raw.githubusercontent.com/$Repo/$Branch/server"
 $InstallDir = "$env:USERPROFILE\.astradeck\server"
 $PlatformToolsDir = "$env:USERPROFILE\.astradeck\platform-tools"
 $AdbExe = "$PlatformToolsDir\adb.exe"
+$InfoFile = "$env:USERPROFILE\.astradeck\server_info.json"
 
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host "       AstraDeck 1-Click Desktop Companion Setup (Windows)  " -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
+
+# ── Helper: get running port ──────────────────────────────────────────────────
+function Get-RunningPort {
+    if (Test-Path $InfoFile) {
+        $info = Get-Content $InfoFile | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($info.port) { return $info.port }
+    }
+    return 8765
+}
+
+# ── IDEMPOTENCY CHECK ─────────────────────────────────────────────────────────
+$AgentRunning = Get-Process -Name python* -ErrorAction SilentlyContinue |
+    Where-Object { $_.MainWindowTitle -eq "" } |
+    Where-Object { (Get-WmiObject Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue).CommandLine -like "*astradeck_agent*" }
+
+if ($AgentRunning -and -not $Force) {
+    $Port = Get-RunningPort
+    Write-Host "[✓] AstraDeck is already running (PID $($AgentRunning.Id), port $Port)." -ForegroundColor Green
+    Write-Host "    Re-run with -Force to reinstall/update." -ForegroundColor Gray
+    return
+}
+if ($AgentRunning -and $Force) {
+    Write-Host "[!] -Force: stopping existing process before reinstall..." -ForegroundColor Yellow
+    $AgentRunning | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+}
 
 # 1. Check Python
 $Python = Get-Command python -ErrorAction SilentlyContinue
@@ -24,7 +52,7 @@ if (-not $Python) {
     return
 }
 
-# 2. Install dependencies
+# 2. Install dependencies (idempotent — pip skips if already installed)
 Write-Host "[*] Checking Python packages (websockets, psutil)..." -ForegroundColor Yellow
 python -m pip install websockets psutil --quiet
 
@@ -34,9 +62,11 @@ New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.astradeck" | Out-Nu
 
 # 4. Download companion files
 Write-Host "[*] Downloading companion agent files..." -ForegroundColor Yellow
-Invoke-RestMethod -Uri "$RawBase/astradeck_agent.py" -OutFile "$InstallDir\astradeck_agent.py"
-Invoke-RestMethod -Uri "$RawBase/app_lifecycle.py" -OutFile "$InstallDir\app_lifecycle.py"
-Invoke-RestMethod -Uri "$RawBase/system_controls.py" -OutFile "$InstallDir\system_controls.py"
+Invoke-RestMethod -Uri "$RawBase/astradeck_agent.py"           -OutFile "$InstallDir\astradeck_agent.py"
+Invoke-RestMethod -Uri "$RawBase/app_lifecycle.py"             -OutFile "$InstallDir\app_lifecycle.py"
+Invoke-RestMethod -Uri "$RawBase/system_controls.py"           -OutFile "$InstallDir\system_controls.py"
+Invoke-RestMethod -Uri "$RawBase/dynamic_function_engine.py"   -OutFile "$InstallDir\dynamic_function_engine.py"
+
 
 # --- Android Debug Bridge (ADB) Auto-Setup ---
 function Setup-Adb {
@@ -117,14 +147,29 @@ Set-Content -Path $VbsPath -Value $VbsContent
 Write-Host "[*] Starting AstraDeck in background..." -ForegroundColor Green
 wscript.exe "$VbsPath"
 
-# 7. Check for connected Android device via ADB
+# 7. Check for connected Android device via ADB (idempotent)
 $AdbCmd = if (Get-Command adb -ErrorAction SilentlyContinue) { "adb" } elseif (Test-Path $AdbExe) { $AdbExe } else { $null }
 if ($AdbCmd) {
-    & $AdbCmd reverse tcp:8765 tcp:8765 2>$null
-    Write-Host "[+] ADB reverse tunnel configured on port 8765." -ForegroundColor Green
+    $Port = Get-RunningPort
+    $Existing = & $AdbCmd reverse --list 2>$null | Where-Object { $_ -like "*tcp:$Port*" }
+    if ($Existing) {
+        Write-Host "[✓] ADB reverse tunnel already active on port $Port." -ForegroundColor Green
+    } else {
+        & $AdbCmd reverse tcp:$Port tcp:$Port 2>$null
+        Write-Host "[✓] ADB reverse tunnel configured on port $Port." -ForegroundColor Green
+    }
 }
 
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "[✓] Setup complete! AstraDeck Companion is running silently." -ForegroundColor Green
-Write-Host "    It will now auto-start whenever you log into Windows." -ForegroundColor Green
+Write-Host "[✓] Setup complete! AstraDeck Companion is running." -ForegroundColor Green
+Write-Host "    Your phone will connect automatically over:" -ForegroundColor Green
+Write-Host "      - USB Tethering  (Settings -> Network -> USB Tethering)" -ForegroundColor Gray
+Write-Host "      - Local Wi-Fi    (same router, zero config)" -ForegroundColor Gray
+Write-Host "      - Bluetooth      (auto-paired)" -ForegroundColor Gray
+if ($AdbCmd) {
+    Write-Host "      - ADB USB tunnel (Developer Options -> USB Debugging)" -ForegroundColor Gray
+}
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host "    Re-run anytime — this script is fully idempotent." -ForegroundColor Gray
+Write-Host "    Flags: -Force (reinstall/update) | -Adb (enable ADB)" -ForegroundColor Gray
 Write-Host "============================================================" -ForegroundColor Cyan

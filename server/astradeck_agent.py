@@ -6,6 +6,8 @@ import shutil
 import subprocess
 import socket
 import platform
+import re
+from typing import Optional
 from pathlib import Path
 import websockets
 from app_lifecycle import AppLifecycleManager
@@ -157,6 +159,98 @@ class AstraDeckServer:
                     last_had_device = True
                 else:
                     last_had_device = False
+            except Exception:
+                pass
+            await asyncio.sleep(2)
+
+    # --- Automatic USB Tethering Reverse Connector ---
+    def get_usb_tether_phone_ips(self):
+        """Discovers candidate IP addresses of phone connected via USB tethering."""
+        primary_ips = []
+        fallback_ips = []
+
+        # 1. Inspect Linux ARP table (/proc/net/arp)
+        try:
+            with open('/proc/net/arp', 'r') as f:
+                for line in f.readlines()[1:]:
+                    parts = line.split()
+                    if len(parts) >= 6:
+                        ip, hw_type, flags, mac, mask, dev = parts[:6]
+                        if flags != '0x0':
+                            d = dev.lower()
+                            if any(u in d for u in ['enp0s20f0u', 'rndis', 'usb', 'enx']):
+                                primary_ips.append(ip)
+                            elif not any(skip in d for skip in ['lo', 'wlan', 'wlp', 'wifi', 'docker', 'virbr', 'tailscale', 'br-']):
+                                fallback_ips.append(ip)
+        except Exception:
+            pass
+
+        # 2. Check default routes via non-wifi interfaces
+        if shutil.which("ip"):
+            try:
+                out = subprocess.check_output(['ip', 'route', 'show'], text=True, stderr=subprocess.DEVNULL)
+                for line in out.splitlines():
+                    if 'via' in line:
+                        d = line.lower()
+                        m = re.search(r'via\s+([0-9.]+)', line)
+                        if m:
+                            gw = m.group(1)
+                            if any(u in d for u in ['enp0s20f0u', 'rndis', 'usb', 'enx']):
+                                primary_ips.append(gw)
+                            elif not any(skip in d for skip in ['lo', 'wlan', 'wlp', 'wifi', 'docker', 'virbr', 'tailscale', 'br-']):
+                                fallback_ips.append(gw)
+            except Exception:
+                pass
+
+        # 3. macOS / Windows fallback via arp -a
+        if not primary_ips and shutil.which("arp"):
+            try:
+                out = subprocess.check_output(['arp', '-a'], text=True, stderr=subprocess.DEVNULL)
+                for line in out.splitlines():
+                    m = re.search(r'\(([0-9.]+)\)', line) or re.search(r'([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)', line)
+                    if m:
+                        candidate = m.group(1)
+                        if not candidate.startswith("127.") and not candidate.endswith(".255"):
+                            fallback_ips.append(candidate)
+            except Exception:
+                pass
+
+        seen = set()
+        result = []
+        for ip in primary_ips + fallback_ips + ['192.168.42.129', '192.168.42.1', '192.168.43.1', '192.168.44.1', '10.42.0.1']:
+            if ip not in seen:
+                seen.add(ip)
+                result.append(ip)
+        return result
+
+    async def run_usb_tether_watchdog(self):
+        """Continuously checks for phone on USB tethering and connects to it if listening on port 8766."""
+        active_ips = set()
+
+        while True:
+            try:
+                candidate_ips = self.get_usb_tether_phone_ips()
+                for phone_ip in candidate_ips:
+                    if phone_ip in active_ips:
+                        continue
+
+                    active_ips.add(phone_ip)
+
+                    async def tether_worker(target_ip):
+                        try:
+                            uri = f"ws://{target_ip}:8766"
+                            async with websockets.connect(uri, open_timeout=0.8, ping_interval=5, ping_timeout=10) as ws:
+                                print(f"[USB Tether] Successfully connected to phone at {uri}!", flush=True)
+                                await self.handle_client(ws)
+                        except (OSError, asyncio.TimeoutError, websockets.exceptions.WebSocketException):
+                            # Port closed or device not listening on 8766
+                            pass
+                        except Exception as e:
+                            print(f"[USB Tether] Session with phone at {target_ip} ended: {e}", flush=True)
+                        finally:
+                            active_ips.discard(target_ip)
+
+                    asyncio.create_task(tether_worker(phone_ip))
             except Exception:
                 pass
             await asyncio.sleep(2)
@@ -506,9 +600,30 @@ class AstraDeckServer:
         # Start Automatic ADB Reverse Watchdog (Auto-tunnel on USB plug-in)
         asyncio.create_task(self.run_adb_reverse_watchdog())
 
-        # Start WebSocket Server on dynamically selected port
-        async with websockets.serve(self.handle_client, "0.0.0.0", self.active_port):
-            await asyncio.Future()
+        # Start Automatic USB Tethering Reverse Connector (connects to phone over USB)
+        asyncio.create_task(self.run_usb_tether_watchdog())
+
+        # Start WebSocket Server — bind on both IPv4 (0.0.0.0) AND IPv6 (::) so USB
+        # tethering link-local connections work even when DHCP didn't assign an IPv4.
+        servers = []
+        try:
+            srv4 = await websockets.serve(self.handle_client, "0.0.0.0", self.active_port)
+            servers.append(srv4)
+        except Exception as e:
+            print(f"[WS] IPv4 bind failed: {e}")
+        try:
+            srv6 = await websockets.serve(self.handle_client, "::", self.active_port)
+            servers.append(srv6)
+            print(f"[WS] Also bound on IPv6 :: (USB link-local connections supported)")
+        except Exception as e:
+            print(f"[WS] IPv6 bind notice: {e}")
+
+        if not servers:
+            raise RuntimeError("Failed to bind WebSocket server on any interface!")
+
+        await asyncio.Future()  # Run forever
+        for s in servers:
+            s.close()
 
 if __name__ == "__main__":
     server = AstraDeckServer()

@@ -21,10 +21,16 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
 import java.io.OutputStream
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 
 class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
@@ -206,6 +212,92 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler, EventCh
                         result.error("INTENT_ERROR", e2.message, null)
                     }
                 }
+            }
+            "getTetherCandidates" -> {
+                val candidates = mutableSetOf<String>()
+                try {
+                    val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                    cm?.allNetworks?.forEach { net ->
+                        val lp = cm.getLinkProperties(net)
+                        lp?.routes?.forEach { route ->
+                            route.gateway?.hostAddress?.let { gw ->
+                                if (gw.isNotEmpty() && gw != "0.0.0.0") candidates.add(gw)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                try {
+                    val en = NetworkInterface.getNetworkInterfaces()
+                    while (en != null && en.hasMoreElements()) {
+                        val iface = en.nextElement()
+                        for (ia in iface.interfaceAddresses) {
+                            ia.broadcast?.hostAddress?.let { bcast ->
+                                candidates.add(bcast)
+                            }
+                            val addr = ia.address
+                            if (addr is Inet4Address && !addr.isLoopbackAddress) {
+                                val host = addr.hostAddress ?: continue
+                                val parts = host.split(".")
+                                if (parts.size == 4) {
+                                    val prefix = "${parts[0]}.${parts[1]}.${parts[2]}"
+                                    candidates.add("$prefix.1")
+                                    candidates.add("$prefix.2")
+                                    candidates.add("$prefix.50")
+                                    candidates.add("$prefix.100")
+                                    candidates.add("$prefix.137")
+                                    candidates.add("$prefix.150")
+                                    candidates.add("$prefix.153")
+                                    candidates.add("$prefix.200")
+                                    candidates.add("$prefix.254")
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                try {
+                    val arp = File("/proc/net/arp")
+                    if (arp.exists() && arp.canRead()) {
+                        arp.forEachLine { line ->
+                            val tokens = line.split("\\s+".toRegex())
+                            if (tokens.isNotEmpty() && tokens[0].matches(Regex("\\d+\\.\\d+\\.\\d+\\.\\d+"))) {
+                                candidates.add(tokens[0])
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                result.success(candidates.toList())
+            }
+            "bindToUsbNetwork" -> {
+                var bound = false
+                try {
+                    val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                    if (cm != null) {
+                        for (net in cm.allNetworks) {
+                            val caps = cm.getNetworkCapabilities(net)
+                            val lp = cm.getLinkProperties(net)
+                            val isUsbTransport = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                caps?.hasTransport(NetworkCapabilities.TRANSPORT_USB) == true
+                            } else false
+                            val iface = lp?.interfaceName?.lowercase() ?: ""
+                            val isUsbIface = iface.contains("rndis") || iface.contains("usb") || iface.contains("ncm")
+                            if (isUsbTransport || isUsbIface) {
+                                bound = cm.bindProcessToNetwork(net)
+                                if (bound) break
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+                result.success(bound)
+            }
+            "unbindFromUsbNetwork" -> {
+                try {
+                    val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                    cm?.bindProcessToNetwork(null)
+                } catch (_: Exception) {}
+                result.success(true)
             }
             else -> result.notImplemented()
         }
