@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/app_settings.dart';
+import '../theme/astradeck_theme.dart';
 import 'storage_service.dart';
 
 class SettingsService extends ChangeNotifier {
@@ -14,6 +15,7 @@ class SettingsService extends ChangeNotifier {
 
   void updateSettings({
     ThemeMode? themeMode,
+    AstraThemePreset? themePreset,
     Color? accentColor,
     bool? showButtonLabels,
     bool? iconOnlyMode,
@@ -40,6 +42,7 @@ class SettingsService extends ChangeNotifier {
   }) {
     _settings = _settings.copyWith(
       themeMode: themeMode,
+      themePreset: themePreset,
       accentColor: accentColor,
       showButtonLabels: showButtonLabels,
       iconOnlyMode: iconOnlyMode,

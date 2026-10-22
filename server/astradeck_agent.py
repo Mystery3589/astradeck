@@ -13,6 +13,13 @@ import websockets
 from app_lifecycle import AppLifecycleManager
 from system_controls import CrossPlatformControls
 from dynamic_function_engine import DynamicFunctionEngine
+from hotkey_injector import HotkeyInjector
+from media_controller import MediaController
+from state_broadcaster import StateBroadcaster
+from spotify_integration import SpotifyIntegration
+from obs_integration import OBSIntegration
+from discord_integration import DiscordIntegration
+from rest_api import RestApiServer
 
 DEFAULT_PORT = 8765
 PORT_RANGE = range(8765, 8785)
@@ -25,6 +32,7 @@ class AstraDeckServer:
         self.os_type = platform.system()
         self.os_version = platform.release()
         self.authenticated_clients = set()
+        self.active_websockets = set()
         self.active_port = DEFAULT_PORT
         self.active_bt_client = None
         self.info_file = Path.home() / ".astradeck" / "server_info.json"
@@ -441,6 +449,7 @@ class AstraDeckServer:
                         provided_token = str(data.get("token", "")).strip()
                         if provided_pin == PIN or provided_token == "session_ok":
                             self.authenticated_clients.add(client_id)
+                            self.active_websockets.add(websocket)
                             print(f"[WS] Client {client_id} successfully authenticated")
                             await websocket.send(json.dumps({
                                 "id": req_id,
@@ -491,6 +500,36 @@ class AstraDeckServer:
             print(f"[WS] Client disconnected: {client_id}")
         finally:
             self.authenticated_clients.discard(client_id)
+            self.active_websockets.discard(websocket)
+
+    async def run_state_broadcast_loop(self):
+        """Periodically pushes state updates to connected Flutter clients."""
+        while True:
+            await asyncio.sleep(1.5)
+            if not self.active_websockets and not self.active_bt_client:
+                continue
+            try:
+                snapshot = StateBroadcaster.get_snapshot()
+                msg = json.dumps({
+                    "type": "state_update",
+                    "event": "state_update",
+                    "states": snapshot,
+                })
+                # 1. Send to all WebSocket clients
+                for ws in list(self.active_websockets):
+                    try:
+                        await ws.send(msg)
+                    except Exception:
+                        self.active_websockets.discard(ws)
+                # 2. Send to Bluetooth client if connected
+                if self.active_bt_client:
+                    try:
+                        loop = asyncio.get_running_loop()
+                        await loop.sock_sendall(self.active_bt_client, (msg + "\n").encode("utf-8"))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
     async def dispatch_action(self, action: str, payload: dict) -> dict:
         print(f"[Dispatch] Action: {action}, Payload: {payload}")
@@ -557,9 +596,34 @@ class AstraDeckServer:
             vol = payload.get("volume", payload.get("value", 75))
             return CrossPlatformControls.set_mic_volume(vol)
 
+        elif action in ("inject_hotkey", "hotkey"):
+            keys = payload.get("keys", [])
+            return HotkeyInjector.send_hotkey(keys)
+
+        elif action in ("paste_text", "type_text"):
+            text = payload.get("text", "")
+            return HotkeyInjector.type_text(text)
+
         elif action == "media_control":
             cmd = payload.get("command", "play_pause")
-            return CrossPlatformControls.media_control(cmd)
+            player = payload.get("player")
+            return MediaController.control(cmd, player=player)
+
+        elif action in ("get_media_status", "media_status"):
+            player = payload.get("player")
+            return MediaController.get_metadata(player=player)
+
+        elif action == "spotify_action" or action.startswith("spotify_"):
+            cmd = payload.get("command") or action
+            return SpotifyIntegration.handle(cmd, payload)
+
+        elif action == "obs_action" or action.startswith("obs_"):
+            cmd = payload.get("command") or action
+            return OBSIntegration.handle(cmd, payload)
+
+        elif action == "discord_action" or action.startswith("discord_"):
+            cmd = payload.get("command") or action
+            return DiscordIntegration.handle(cmd, payload)
 
         elif action == "get_system_status":
             vol, brightness = CrossPlatformControls.get_current_state()
@@ -602,6 +666,28 @@ class AstraDeckServer:
 
         # Start Automatic USB Tethering Reverse Connector (connects to phone over USB)
         asyncio.create_task(self.run_usb_tether_watchdog())
+
+        # Start Real-Time State Broadcaster (pushes live CPU/RAM/media/window stats to phone)
+        asyncio.create_task(self.run_state_broadcast_loop())
+
+        # Start REST API Server (port companion + 1, e.g. 8766)
+        try:
+            loop = asyncio.get_running_loop()
+            self.rest_server = RestApiServer(
+                self.active_port + 1,
+                lambda act, pay: asyncio.run_coroutine_threadsafe(self.dispatch_action(act, pay), loop).result(timeout=5),
+                lambda: {
+                    "status": "ok",
+                    "hostname": self.hostname,
+                    "os": self.os_type,
+                    "version": VERSION,
+                    "wsPort": self.active_port,
+                    "activeClients": len(self.active_websockets),
+                }
+            )
+            self.rest_server.start()
+        except Exception as e:
+            print(f"[REST API] Notice: {e}")
 
         # Start WebSocket Server — bind on both IPv4 (0.0.0.0) AND IPv6 (::) so USB
         # tethering link-local connections work even when DHCP didn't assign an IPv4.

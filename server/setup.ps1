@@ -53,8 +53,8 @@ if (-not $Python) {
 }
 
 # 2. Install dependencies (idempotent — pip skips if already installed)
-Write-Host "[*] Checking Python packages (websockets, psutil)..." -ForegroundColor Yellow
-python -m pip install websockets psutil --quiet
+Write-Host "[*] Checking Python packages (websockets, psutil, pyautogui, pywin32)..." -ForegroundColor Yellow
+python -m pip install websockets psutil pyautogui pywin32 --quiet
 
 # 3. Create install directory
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
@@ -66,6 +66,13 @@ Invoke-RestMethod -Uri "$RawBase/astradeck_agent.py"           -OutFile "$Instal
 Invoke-RestMethod -Uri "$RawBase/app_lifecycle.py"             -OutFile "$InstallDir\app_lifecycle.py"
 Invoke-RestMethod -Uri "$RawBase/system_controls.py"           -OutFile "$InstallDir\system_controls.py"
 Invoke-RestMethod -Uri "$RawBase/dynamic_function_engine.py"   -OutFile "$InstallDir\dynamic_function_engine.py"
+Invoke-RestMethod -Uri "$RawBase/hotkey_injector.py"           -OutFile "$InstallDir\hotkey_injector.py"
+Invoke-RestMethod -Uri "$RawBase/media_controller.py"          -OutFile "$InstallDir\media_controller.py"
+Invoke-RestMethod -Uri "$RawBase/state_broadcaster.py"         -OutFile "$InstallDir\state_broadcaster.py"
+Invoke-RestMethod -Uri "$RawBase/spotify_integration.py"       -OutFile "$InstallDir\spotify_integration.py"
+Invoke-RestMethod -Uri "$RawBase/obs_integration.py"           -OutFile "$InstallDir\obs_integration.py"
+Invoke-RestMethod -Uri "$RawBase/discord_integration.py"       -OutFile "$InstallDir\discord_integration.py"
+Invoke-RestMethod -Uri "$RawBase/rest_api.py"                  -OutFile "$InstallDir\rest_api.py"
 
 
 # --- Android Debug Bridge (ADB) Auto-Setup ---

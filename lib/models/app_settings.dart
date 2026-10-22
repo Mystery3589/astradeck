@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import '../theme/astradeck_theme.dart';
 
 class AppSettings {
   // Theme & Appearance
   ThemeMode themeMode;
+  AstraThemePreset themePreset;
   Color accentColor;
   bool showButtonLabels;
   bool iconOnlyMode;
@@ -40,6 +42,7 @@ class AppSettings {
 
   AppSettings({
     this.themeMode = ThemeMode.dark,
+    this.themePreset = AstraThemePreset.midnight,
     this.accentColor = const Color(0xFF6366F1), // Indigo accent
     this.showButtonLabels = true,
     this.iconOnlyMode = false,
@@ -78,6 +81,7 @@ class AppSettings {
 
   AppSettings copyWith({
     ThemeMode? themeMode,
+    AstraThemePreset? themePreset,
     Color? accentColor,
     bool? showButtonLabels,
     bool? iconOnlyMode,
@@ -107,6 +111,7 @@ class AppSettings {
   }) {
     return AppSettings(
       themeMode: themeMode ?? this.themeMode,
+      themePreset: themePreset ?? this.themePreset,
       accentColor: accentColor ?? this.accentColor,
       showButtonLabels: showButtonLabels ?? this.showButtonLabels,
       iconOnlyMode: iconOnlyMode ?? this.iconOnlyMode,
@@ -138,6 +143,7 @@ class AppSettings {
 
   Map<String, dynamic> toJson() => {
     'themeMode': themeMode.name,
+    'themePreset': themePreset.name,
     'accentColor': accentColor.toARGB32(),
     'showButtonLabels': showButtonLabels,
     'iconOnlyMode': iconOnlyMode,
@@ -172,6 +178,7 @@ class AppSettings {
         (e) => e.name == json['themeMode'],
         orElse: () => ThemeMode.dark,
       ),
+      themePreset: AstraThemePresetExtension.fromString(json['themePreset'] as String?),
       accentColor: json['accentColor'] != null
           ? Color(json['accentColor'] as int)
           : const Color(0xFF6366F1),

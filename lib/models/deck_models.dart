@@ -10,6 +10,13 @@ enum ActionType {
   switchProfile,
   actionSequence,
   dynamicFunction,
+  injectHotkey,
+  pasteText,
+  mediaControl,
+  toggleButton,
+  folderAction,
+  spotifyAction,
+  discordAction,
 }
 
 extension ActionTypeExtension on ActionType {
@@ -37,6 +44,20 @@ extension ActionTypeExtension on ActionType {
         return 'Execute Action Sequence';
       case ActionType.dynamicFunction:
         return 'Custom Action (Auto-Created)';
+      case ActionType.injectHotkey:
+        return 'Keyboard Hotkey / Shortcut';
+      case ActionType.pasteText:
+        return 'Paste / Type Text Macro';
+      case ActionType.mediaControl:
+        return 'Media Playback Controls';
+      case ActionType.toggleButton:
+        return 'Two-State Toggle Button';
+      case ActionType.folderAction:
+        return 'Open Action Folder';
+      case ActionType.spotifyAction:
+        return 'Spotify Controller';
+      case ActionType.discordAction:
+        return 'Discord Voice & Status';
     }
   }
 
@@ -77,6 +98,8 @@ class DeckButton {
   bool requiresConfirmation;
   bool hapticFeedback;
   bool isEnabled;
+  String? liveStatePath;
+  bool toggleState;
 
   DeckButton({
     required this.id,
@@ -98,6 +121,8 @@ class DeckButton {
     this.requiresConfirmation = false,
     this.hapticFeedback = true,
     this.isEnabled = true,
+    this.liveStatePath,
+    this.toggleState = false,
   });
 
   DeckButton copyWith({
@@ -120,6 +145,8 @@ class DeckButton {
     bool? requiresConfirmation,
     bool? hapticFeedback,
     bool? isEnabled,
+    String? liveStatePath,
+    bool? toggleState,
   }) {
     return DeckButton(
       id: id ?? this.id,
@@ -141,6 +168,8 @@ class DeckButton {
       requiresConfirmation: requiresConfirmation ?? this.requiresConfirmation,
       hapticFeedback: hapticFeedback ?? this.hapticFeedback,
       isEnabled: isEnabled ?? this.isEnabled,
+      liveStatePath: liveStatePath ?? this.liveStatePath,
+      toggleState: toggleState ?? this.toggleState,
     );
   }
 
@@ -164,6 +193,8 @@ class DeckButton {
     'requiresConfirmation': requiresConfirmation,
     'hapticFeedback': hapticFeedback,
     'isEnabled': isEnabled,
+    'liveStatePath': liveStatePath,
+    'toggleState': toggleState,
   };
 
   factory DeckButton.fromJson(Map<String, dynamic> json) {
@@ -190,6 +221,8 @@ class DeckButton {
       requiresConfirmation: json['requiresConfirmation'] as bool? ?? false,
       hapticFeedback: json['hapticFeedback'] as bool? ?? true,
       isEnabled: json['isEnabled'] as bool? ?? true,
+      liveStatePath: json['liveStatePath'] as String?,
+      toggleState: json['toggleState'] as bool? ?? false,
     );
   }
 }
@@ -243,6 +276,8 @@ class DeckProfile {
   List<DeckPage> pages;
   String? defaultDesktopId;
   String? obsConfigRef;
+  String? autoSwitchWindowTitle;
+  int defaultPageIndex;
   Map<String, dynamic> appearanceConfig;
 
   DeckProfile({
@@ -254,6 +289,8 @@ class DeckProfile {
     required this.pages,
     this.defaultDesktopId,
     this.obsConfigRef,
+    this.autoSwitchWindowTitle,
+    this.defaultPageIndex = 0,
     Map<String, dynamic>? appearanceConfig,
   }) : appearanceConfig = appearanceConfig ?? {
           'buttonSpacing': 12.0,
@@ -272,6 +309,8 @@ class DeckProfile {
     List<DeckPage>? pages,
     String? defaultDesktopId,
     String? obsConfigRef,
+    String? autoSwitchWindowTitle,
+    int? defaultPageIndex,
     Map<String, dynamic>? appearanceConfig,
   }) {
     return DeckProfile(
@@ -283,6 +322,8 @@ class DeckProfile {
       pages: pages ?? this.pages.map((p) => p.copyWith()).toList(),
       defaultDesktopId: defaultDesktopId ?? this.defaultDesktopId,
       obsConfigRef: obsConfigRef ?? this.obsConfigRef,
+      autoSwitchWindowTitle: autoSwitchWindowTitle ?? this.autoSwitchWindowTitle,
+      defaultPageIndex: defaultPageIndex ?? this.defaultPageIndex,
       appearanceConfig: appearanceConfig != null ? Map<String, dynamic>.from(appearanceConfig) : Map<String, dynamic>.from(this.appearanceConfig),
     );
   }
@@ -296,6 +337,8 @@ class DeckProfile {
     'pages': pages.map((p) => p.toJson()).toList(),
     'defaultDesktopId': defaultDesktopId,
     'obsConfigRef': obsConfigRef,
+    'autoSwitchWindowTitle': autoSwitchWindowTitle,
+    'defaultPageIndex': defaultPageIndex,
     'appearanceConfig': appearanceConfig,
   };
 
@@ -311,6 +354,8 @@ class DeckProfile {
           .toList(),
       defaultDesktopId: json['defaultDesktopId'] as String?,
       obsConfigRef: json['obsConfigRef'] as String?,
+      autoSwitchWindowTitle: json['autoSwitchWindowTitle'] as String?,
+      defaultPageIndex: json['defaultPageIndex'] as int? ?? 0,
       appearanceConfig: json['appearanceConfig'] is Map
           ? Map<String, dynamic>.from(json['appearanceConfig'])
           : null,

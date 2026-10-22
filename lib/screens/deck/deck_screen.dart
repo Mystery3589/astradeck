@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 import '../../models/deck_models.dart';
@@ -6,9 +7,14 @@ import '../../services/profile_service.dart';
 import '../../services/settings_service.dart';
 import '../../services/connection_service.dart';
 import '../../services/deck_execution_service.dart';
+import '../../services/live_state_service.dart';
+import '../../theme/astradeck_theme.dart';
 import '../../utils/icon_helper.dart';
 import '../../widgets/button_editor_dialog.dart';
 import '../../widgets/connect_pc_modal.dart';
+import '../../widgets/profile_settings_sheet.dart';
+import '../../widgets/folder_overlay_widget.dart';
+import '../../widgets/swipe_page_switcher.dart';
 
 class DeckScreen extends StatelessWidget {
   const DeckScreen({super.key});
@@ -19,40 +25,67 @@ class DeckScreen extends StatelessWidget {
     final settingsService = context.watch<SettingsService>();
     final connectionService = context.watch<ConnectionService>();
     final executionService = context.watch<DeckExecutionService>();
+    final liveStateService = context.watch<LiveStateService>();
+    final theme = Theme.of(context);
+    final themeBundle = AstraThemeBundle.of(context);
 
     final profile = profileService.currentProfile;
     final page = profileService.currentPage;
     final isEditMode = profileService.isEditMode;
 
     return Scaffold(
+      backgroundColor: themeBundle.scaffoldBg,
       appBar: AppBar(
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: settingsService.settings.accentColor.withValues(alpha: 0.2),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.dashboard_customize, color: settingsService.settings.accentColor, size: 20),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('AstraDeck', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                  Text(
-                    '${profile.name} • ${page.name}',
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+        title: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => ProfileSettingsSheet.show(context, profile),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primary.withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
                   ),
-                ],
-              ),
+                  child: Icon(Icons.dashboard_customize_rounded, color: theme.colorScheme.primary, size: 20),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              profile.name,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: themeBundle.textPrimary,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(Icons.arrow_drop_down_rounded, color: themeBundle.textSecondary, size: 18),
+                        ],
+                      ),
+                      Text(
+                        '${profile.gridRows}×${profile.gridCols} Grid • ${page.name}',
+                        style: TextStyle(fontSize: 11, color: themeBundle.textSecondary),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
         actions: [
           // Connection pill indicator
@@ -248,8 +281,9 @@ class DeckScreen extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1E293B),
+                      color: themeBundle.cardBg,
                       borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: themeBundle.borderColor),
                     ),
                     child: Row(
                       children: [
@@ -258,7 +292,7 @@ class DeckScreen extends StatelessWidget {
                           constraints: const BoxConstraints(),
                           icon: Icon(
                             executionService.isSystemMuted ? Icons.volume_off : Icons.volume_up,
-                            color: executionService.isSystemMuted ? Colors.redAccent : Colors.white70,
+                            color: executionService.isSystemMuted ? Colors.redAccent : themeBundle.textSecondary,
                             size: 16,
                           ),
                           onPressed: () => executionService.toggleSystemMute(),
@@ -275,14 +309,14 @@ class DeckScreen extends StatelessWidget {
                               min: 0,
                               max: 100,
                               activeColor: settingsService.settings.accentColor,
-                              inactiveColor: Colors.white24,
+                              inactiveColor: themeBundle.borderColor,
                               onChanged: (val) => executionService.setSystemVolume(val),
                             ),
                           ),
                         ),
                         Text(
                           '${executionService.systemVolume.round()}%',
-                          style: const TextStyle(fontSize: 10, color: Colors.white70, fontWeight: FontWeight.bold),
+                          style: TextStyle(fontSize: 10, color: themeBundle.textSecondary, fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -294,8 +328,9 @@ class DeckScreen extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1E293B),
+                      color: themeBundle.cardBg,
                       borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: themeBundle.borderColor),
                     ),
                     child: Row(
                       children: [
@@ -312,14 +347,14 @@ class DeckScreen extends StatelessWidget {
                               min: 0,
                               max: 100,
                               activeColor: Colors.amber,
-                              inactiveColor: Colors.white24,
+                              inactiveColor: themeBundle.borderColor,
                               onChanged: (val) => executionService.setBrightness(val),
                             ),
                           ),
                         ),
                         Text(
                           '${executionService.screenBrightness.round()}%',
-                          style: const TextStyle(fontSize: 10, color: Colors.white70, fontWeight: FontWeight.bold),
+                          style: TextStyle(fontSize: 10, color: themeBundle.textSecondary, fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -335,12 +370,12 @@ class DeckScreen extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               decoration: BoxDecoration(
-                color: const Color(0xFF1E293B),
+                color: themeBundle.cardBg,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: executionService.isMicMuted
                       ? Colors.redAccent.withValues(alpha: 0.5)
-                      : Colors.transparent,
+                      : themeBundle.borderColor,
                   width: 1,
                 ),
               ),
@@ -370,7 +405,7 @@ class DeckScreen extends StatelessWidget {
                         activeColor: executionService.isMicMuted
                             ? Colors.redAccent
                             : const Color(0xFF34D399),
-                        inactiveColor: Colors.white24,
+                        inactiveColor: themeBundle.borderColor,
                         onChanged: executionService.isMicMuted
                             ? null
                             : (val) => executionService.setMicVolume(val),
@@ -384,7 +419,7 @@ class DeckScreen extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
-                      color: executionService.isMicMuted ? Colors.redAccent : Colors.white70,
+                      color: executionService.isMicMuted ? Colors.redAccent : themeBundle.textSecondary,
                     ),
                   ),
                 ],
@@ -392,56 +427,62 @@ class DeckScreen extends StatelessWidget {
             ),
           ),
 
+          // Scrollable Page Tab Bar
+          if (profile.pages.length > 1 || isEditMode)
+            Container(
+              height: 44,
+              margin: const EdgeInsets.symmetric(vertical: 4),
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: profile.pages.length + (isEditMode ? 1 : 0),
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (context, idx) {
+                  if (idx == profile.pages.length) {
+                    return ActionChip(
+                      avatar: Icon(Icons.add, size: 16, color: theme.colorScheme.primary),
+                      label: const Text('Add Page', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                      backgroundColor: themeBundle.cardBg,
+                      side: BorderSide(color: themeBundle.borderColor),
+                      onPressed: () => _promptAddPage(context, profileService),
+                    );
+                  }
+                  final isCurrent = idx == profileService.activePageIndex;
+                  final pageItem = profile.pages[idx];
+                  return GestureDetector(
+                    onLongPress: () => _showPageOptions(context, profileService, idx, pageItem.name),
+                    child: FilterChip(
+                      selected: isCurrent,
+                      label: Text(
+                        pageItem.name,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: isCurrent ? FontWeight.bold : FontWeight.w500,
+                          color: isCurrent ? Colors.white : themeBundle.textSecondary,
+                        ),
+                      ),
+                      selectedColor: settingsService.settings.accentColor,
+                      backgroundColor: themeBundle.cardBg,
+                      side: BorderSide(
+                        color: isCurrent
+                            ? settingsService.settings.accentColor
+                            : themeBundle.borderColor,
+                      ),
+                      showCheckmark: false,
+                      onSelected: (_) => profileService.setActivePage(idx),
+                    ),
+                  );
+                },
+              ),
+            ),
+
           // Main Deck Button Grid
           Expanded(
             child: Padding(
               padding: EdgeInsets.all(settingsService.settings.buttonSpacing),
-              child: _buildGrid(context, profileService, settingsService, executionService),
+              child: _buildGrid(context, profileService, settingsService, executionService, liveStateService),
             ),
           ),
-
-          // Page Switcher Navigation Bar
-          if (profile.pages.length > 1 || isEditMode)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: const Color(0xFF0F172A),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  ...List.generate(profile.pages.length, (idx) {
-                    final isCurrent = idx == profileService.activePageIndex;
-                    return InkWell(
-                      onTap: () => profileService.setActivePage(idx),
-                      borderRadius: BorderRadius.circular(20),
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 4),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: isCurrent
-                              ? settingsService.settings.accentColor
-                              : const Color(0xFF1E293B),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          profile.pages[idx].name,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: isCurrent ? Colors.white : Colors.white70,
-                          ),
-                        ),
-                      ),
-                    );
-                  }),
-                  if (isEditMode)
-                    IconButton(
-                      icon: const Icon(Icons.add_circle_outline, color: Colors.white70, size: 20),
-                      tooltip: 'Add Deck Page',
-                      onPressed: () => _promptAddPage(context, profileService),
-                    ),
-                ],
-              ),
-            ),
         ],
       ),
     );
@@ -452,11 +493,104 @@ class DeckScreen extends StatelessWidget {
     ProfileService profileService,
     SettingsService settingsService,
     DeckExecutionService executionService,
+    LiveStateService liveStateService,
   ) {
-    final page = profileService.currentPage;
     final profile = profileService.currentProfile;
     final isEditMode = profileService.isEditMode;
+
+    if (isEditMode) {
+      return _buildSinglePageGrid(
+        context,
+        profileService.currentPage,
+        profileService,
+        settingsService,
+        executionService,
+        liveStateService,
+        isEditMode: true,
+      );
+    }
+
+    return SwipePageSwitcher(
+      profile: profile,
+      activePageIndex: profileService.activePageIndex,
+      onPageChanged: (idx) => profileService.setActivePage(idx),
+      pageBuilder: (context, page) => _buildSinglePageGrid(
+        context,
+        page,
+        profileService,
+        settingsService,
+        executionService,
+        liveStateService,
+        isEditMode: false,
+      ),
+    );
+  }
+
+  Widget _buildSinglePageGrid(
+    BuildContext context,
+    DeckPage page,
+    ProfileService profileService,
+    SettingsService settingsService,
+    DeckExecutionService executionService,
+    LiveStateService liveStateService, {
+    required bool isEditMode,
+  }) {
+    final profile = profileService.currentProfile;
     final spacing = settingsService.settings.buttonSpacing;
+    final themeBundle = AstraThemeBundle.of(context);
+
+    if (page.buttons.isEmpty) {
+      return Center(
+        child: Container(
+          margin: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: themeBundle.cardBg,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: themeBundle.borderColor),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.dashboard_customize_outlined,
+                size: 44,
+                color: themeBundle.textSecondary.withValues(alpha: 0.5),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'No buttons on "${page.name}"',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: themeBundle.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Add shortcuts, hotkeys, media controls or app openers to build your deck.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: themeBundle.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add Button'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: settingsService.settings.accentColor,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: () => _addNewButton(context, profileService),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     if (isEditMode) {
       // Reorderable wrap / grid during edit mode
@@ -475,6 +609,7 @@ class DeckScreen extends StatelessWidget {
                 profileService,
                 settingsService,
                 executionService,
+                liveStateService: liveStateService,
                 isEditMode: true,
               ),
             ),
@@ -502,6 +637,7 @@ class DeckScreen extends StatelessWidget {
               profileService,
               settingsService,
               executionService,
+              liveStateService: liveStateService,
               isEditMode: false,
             );
           },
@@ -517,7 +653,9 @@ class DeckScreen extends StatelessWidget {
     SettingsService settingsService,
     DeckExecutionService executionService, {
     required bool isEditMode,
+    LiveStateService? liveStateService,
   }) {
+    final themeBundle = AstraThemeBundle.of(context);
     final radius = settingsService.settings.buttonCornerRadius;
     final showLabels = settingsService.settings.showButtonLabels;
     final iconOnly = settingsService.settings.iconOnlyMode;
@@ -536,6 +674,18 @@ class DeckScreen extends StatelessWidget {
         break;
     }
 
+    final isDefaultBg = button.backgroundColor == 0xFF1E293B;
+    final isToggleActive = button.actionType == ActionType.toggleButton && button.toggleState;
+    final baseBg = isDefaultBg ? themeBundle.cardBg : Color(button.backgroundColor);
+    final bgColor = isToggleActive
+        ? Color.alphaBlend(settingsService.settings.accentColor.withValues(alpha: 0.35), baseBg)
+        : baseBg;
+    final borderColor = isEditMode
+        ? const Color(0xFFF59E0B)
+        : (isToggleActive
+            ? settingsService.settings.accentColor
+            : (isDefaultBg ? themeBundle.borderColor : Colors.white12));
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -543,27 +693,40 @@ class DeckScreen extends StatelessWidget {
           if (isEditMode) {
             _openButtonEditor(context, button, profileService);
           } else {
-            _triggerAction(context, button, executionService, settingsService);
+            _triggerAction(context, button, executionService, settingsService, liveStateService);
           }
         },
         onLongPress: isEditMode
             ? null
             : () {
-                _openButtonEditor(context, button, profileService);
+                if (button.longPressActionType != null && button.longPressPayload != null) {
+                  if (button.hapticFeedback && settingsService.settings.hapticFeedbackEnabled) {
+                    HapticFeedback.mediumImpact();
+                  }
+                  final fakeButton = button.copyWith(
+                    actionType: button.longPressActionType!,
+                    actionPayload: button.longPressPayload!,
+                  );
+                  _triggerAction(context, fakeButton, executionService, settingsService, liveStateService);
+                } else {
+                  _openButtonEditor(context, button, profileService);
+                }
               },
         borderRadius: borderRadius,
         child: Ink(
           decoration: BoxDecoration(
-            color: Color(button.backgroundColor),
+            color: bgColor,
             borderRadius: borderRadius,
             border: Border.all(
-              color: isEditMode ? const Color(0xFFF59E0B) : Colors.white12,
-              width: isEditMode ? 2 : 1,
+              color: borderColor,
+              width: isEditMode || isToggleActive ? 2 : 1,
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.25),
-                blurRadius: 6,
+                color: isToggleActive
+                    ? settingsService.settings.accentColor.withValues(alpha: 0.3)
+                    : Colors.black.withValues(alpha: 0.25),
+                blurRadius: isToggleActive ? 10 : 6,
                 offset: const Offset(0, 3),
               ),
             ],
@@ -595,23 +758,46 @@ class DeckScreen extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    if (button.subtitle.isNotEmpty)
-                      Padding(
+                    () {
+                      final liveValue = (button.liveStatePath != null && button.liveStatePath!.isNotEmpty)
+                          ? liveStateService?.formatStateValue(button.liveStatePath)
+                          : null;
+                      final displaySubtitle = liveValue ?? button.subtitle;
+                      if (displaySubtitle.isEmpty) return const SizedBox.shrink();
+
+                      return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 4),
                         child: Text(
-                          button.subtitle,
+                          displaySubtitle,
                           textAlign: TextAlign.center,
                           style: TextStyle(
-                            color: Color(button.textColor).withValues(alpha: 0.7),
+                            color: liveValue != null
+                                ? settingsService.settings.accentColor
+                                : Color(button.textColor).withValues(alpha: 0.7),
+                            fontWeight: liveValue != null ? FontWeight.w600 : FontWeight.normal,
                             fontSize: 9,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                      ),
+                      );
+                    }(),
                   ],
                 ],
               ),
+              if (button.actionType == ActionType.toggleButton && !isEditMode)
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: isToggleActive ? settingsService.settings.accentColor : Colors.white24,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
               if (isEditMode)
                 const Positioned(
                   top: 6,
@@ -634,26 +820,72 @@ class DeckScreen extends StatelessWidget {
     DeckButton button,
     DeckExecutionService executionService,
     SettingsService settingsService,
+    LiveStateService? liveStateService,
   ) {
+    // Haptics feedback based on action type
+    if (button.hapticFeedback && settingsService.settings.hapticFeedbackEnabled) {
+      if (button.actionType == ActionType.toggleButton) {
+        HapticFeedback.selectionClick();
+      } else if (button.requiresConfirmation) {
+        HapticFeedback.heavyImpact();
+      } else {
+        HapticFeedback.lightImpact();
+      }
+    }
+
+    // Folder popup overlay support
+    if (button.actionType == ActionType.folderAction) {
+      final rawList = button.actionPayload['buttons'];
+      List<DeckButton> subButtons = [];
+      if (rawList is List) {
+        subButtons = rawList.map((e) => DeckButton.fromJson(Map<String, dynamic>.from(e))).toList();
+      }
+      if (liveStateService != null) {
+        FolderOverlayWidget.show(
+          context,
+          parentButton: button,
+          buttons: subButtons,
+          executionService: executionService,
+          settingsService: settingsService,
+          liveStateService: liveStateService,
+        );
+      }
+      return;
+    }
+
+    final themeBundle = AstraThemeBundle.of(context);
     if (button.requiresConfirmation) {
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
-          backgroundColor: const Color(0xFF1E293B),
-          title: Text('Execute ${button.title}?'),
-          content: Text('Are you sure you want to trigger "${button.title}"?'),
+          backgroundColor: themeBundle.cardBg,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: themeBundle.borderColor),
+          ),
+          title: Text(
+            'Execute ${button.title}?',
+            style: TextStyle(color: themeBundle.textPrimary),
+          ),
+          content: Text(
+            'Are you sure you want to trigger "${button.title}"?',
+            style: TextStyle(color: themeBundle.textSecondary),
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+              child: Text('Cancel', style: TextStyle(color: themeBundle.textSecondary)),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF6366F1)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: settingsService.settings.accentColor,
+                foregroundColor: Colors.white,
+              ),
               onPressed: () {
                 Navigator.of(ctx).pop();
                 executionService.executeButton(button, settingsService.settings);
               },
-              child: const Text('Confirm', style: TextStyle(color: Colors.white)),
+              child: const Text('Confirm'),
             ),
           ],
         ),
@@ -688,19 +920,179 @@ class DeckScreen extends StatelessWidget {
     _openButtonEditor(context, newBtn, profileService);
   }
 
+  void _showPageOptions(BuildContext context, ProfileService profileService, int pageIndex, String pageName) {
+    final themeBundle = AstraThemeBundle.of(context);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: themeBundle.cardBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: themeBundle.borderColor,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    Icon(Icons.layers_rounded, color: themeBundle.textPrimary, size: 20),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Page: $pageName',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: themeBundle.textPrimary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: Icon(Icons.edit_outlined, color: themeBundle.textPrimary),
+                title: Text('Rename Page', style: TextStyle(color: themeBundle.textPrimary)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _promptRenamePage(context, profileService, pageIndex, pageName);
+                },
+              ),
+              if (profileService.currentProfile.pages.length > 1)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                  title: const Text('Delete Page', style: TextStyle(color: Colors.redAccent)),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    _promptDeletePage(context, profileService, pageIndex, pageName);
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _promptRenamePage(BuildContext context, ProfileService profileService, int pageIndex, String currentName) {
+    final themeBundle = AstraThemeBundle.of(context);
+    final controller = TextEditingController(text: currentName);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: themeBundle.cardBg,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: themeBundle.borderColor),
+        ),
+        title: Text('Rename Page', style: TextStyle(color: themeBundle.textPrimary)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: TextStyle(color: themeBundle.textPrimary),
+          decoration: InputDecoration(
+            labelText: 'Page Name',
+            labelStyle: TextStyle(color: themeBundle.textSecondary),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: themeBundle.borderColor),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('Cancel', style: TextStyle(color: themeBundle.textSecondary)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final newName = controller.text.trim();
+              if (newName.isNotEmpty) {
+                profileService.renamePage(pageIndex, newName);
+              }
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('Rename'),
+          ),
+        ],
+      ),
+    ).then((_) => controller.dispose());
+  }
+
+  void _promptDeletePage(BuildContext context, ProfileService profileService, int pageIndex, String pageName) {
+    final themeBundle = AstraThemeBundle.of(context);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: themeBundle.cardBg,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: themeBundle.borderColor),
+        ),
+        title: Text('Delete Page "$pageName"?', style: TextStyle(color: themeBundle.textPrimary)),
+        content: Text(
+          'All buttons on this page will be permanently removed.',
+          style: TextStyle(color: themeBundle.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('Cancel', style: TextStyle(color: themeBundle.textSecondary)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              profileService.deletePage(pageIndex);
+            },
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _promptAddPage(BuildContext context, ProfileService profileService) {
+    final themeBundle = AstraThemeBundle.of(context);
     final controller = TextEditingController();
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
-        title: const Text('Add Deck Page'),
+        backgroundColor: themeBundle.cardBg,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: themeBundle.borderColor),
+        ),
+        title: Text('Add Deck Page', style: TextStyle(color: themeBundle.textPrimary)),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(labelText: 'Page Name (e.g. Controls 2)'),
+          autofocus: true,
+          style: TextStyle(color: themeBundle.textPrimary),
+          decoration: InputDecoration(
+            labelText: 'Page Name (e.g. Media, Dev)',
+            labelStyle: TextStyle(color: themeBundle.textSecondary),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: themeBundle.borderColor),
+            ),
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('Cancel', style: TextStyle(color: themeBundle.textSecondary)),
+          ),
           ElevatedButton(
             onPressed: () {
               final pageName = controller.text.trim();

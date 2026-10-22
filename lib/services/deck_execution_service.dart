@@ -3,9 +3,13 @@ import 'package:flutter/services.dart';
 import '../models/deck_models.dart';
 import '../models/app_settings.dart';
 import 'connection_service.dart';
+import 'live_state_service.dart';
+import 'profile_service.dart';
 
 class DeckExecutionService extends ChangeNotifier {
   final ConnectionService _connectionService;
+  final LiveStateService _liveStateService;
+  final ProfileService _profileService;
 
   double _systemVolume = 65.0;
   bool _isSystemMuted = false;
@@ -15,7 +19,11 @@ class DeckExecutionService extends ChangeNotifier {
 
   final List<String> _activityLogs = [];
 
-  DeckExecutionService(this._connectionService) {
+  DeckExecutionService(
+    this._connectionService,
+    this._liveStateService,
+    this._profileService,
+  ) {
     // When server pushes state after auth, sync the sliders immediately
     _connectionService.onSystemState = (vol, brightness) {
       if (vol != null) {
@@ -26,6 +34,35 @@ class DeckExecutionService extends ChangeNotifier {
       }
       notifyListeners();
     };
+
+    // When server pushes a full state_update snapshot, forward to LiveStateService
+    // and check auto-profile switching
+    _connectionService.onStateUpdate = (states) {
+      _liveStateService.updateStates(states);
+      _checkAutoProfileSwitch(states);
+    };
+  }
+
+  /// Checks whether the active window title matches any profile's auto-switch trigger
+  /// and switches to that profile if found.
+  void _checkAutoProfileSwitch(Map<String, dynamic> states) {
+    final windowMap = states['window'];
+    if (windowMap is! Map) return;
+    final title = windowMap['title']?.toString() ?? '';
+    if (title.isEmpty) return;
+
+    for (final profile in _profileService.profiles) {
+      final trigger = profile.autoSwitchWindowTitle;
+      if (trigger != null && trigger.isNotEmpty) {
+        if (title.toLowerCase().contains(trigger.toLowerCase())) {
+          if (_profileService.activeProfileId != profile.id) {
+            _profileService.setActiveProfile(profile.id);
+            _log('Auto-switched profile → "${profile.name}" (window: $title)');
+          }
+          return;
+        }
+      }
+    }
   }
 
   double get systemVolume => _systemVolume;
@@ -125,8 +162,12 @@ class DeckExecutionService extends ChangeNotifier {
         return true;
 
       case ActionType.obsAction:
-        _log('Opening OBS Studio');
-        _connectionService.sendAction('launch_app', {'app': 'OBS Studio'});
+        final cmd = button.actionPayload['command']?.toString() ?? 'toggle_recording';
+        _log('OBS command: $cmd');
+        _connectionService.sendAction('obs_action', {
+          'command': cmd,
+          ...button.actionPayload,
+        });
         return true;
 
       case ActionType.switchPage:
@@ -165,6 +206,69 @@ class DeckExecutionService extends ChangeNotifier {
         } else {
           _log('Executed action sequence payload');
         }
+        return true;
+
+      case ActionType.injectHotkey:
+        final rawKeys = button.actionPayload['keys'];
+        final List<String> keys = rawKeys is List
+            ? rawKeys.map((e) => e.toString()).toList()
+            : (button.actionPayload['combo']?.toString().split('+') ?? ['ctrl']);
+        _log('Injecting hotkey: ${keys.join("+")}');
+        _connectionService.sendAction('inject_hotkey', {'keys': keys});
+        return true;
+
+      case ActionType.pasteText:
+        final text = button.actionPayload['text']?.toString() ?? '';
+        _log('Pasting text (${text.length} chars)');
+        _connectionService.sendAction('paste_text', {'text': text});
+        return true;
+
+      case ActionType.mediaControl:
+        final cmd = button.actionPayload['command']?.toString() ?? 'play_pause';
+        final player = button.actionPayload['player']?.toString();
+        _log('Media control: $cmd${player != null ? " ($player)" : ""}');
+        _connectionService.sendAction('media_control', {
+          'command': cmd,
+          'player': ?player,
+        });
+        return true;
+
+      case ActionType.spotifyAction:
+        final cmd = button.actionPayload['command']?.toString() ?? 'play_pause';
+        _log('Spotify control: $cmd');
+        _connectionService.sendAction('spotify_action', {'command': cmd});
+        return true;
+
+      case ActionType.discordAction:
+        final cmd = button.actionPayload['command']?.toString() ?? 'toggle_mute';
+        _log('Discord action: $cmd');
+        final hotkey = button.actionPayload['hotkey'];
+        if (hotkey is List) {
+          _connectionService.sendAction('inject_hotkey', {'keys': hotkey.map((e) => e.toString()).toList()});
+        } else {
+          _connectionService.sendAction('inject_hotkey', {'keys': ['ctrl', 'shift', 'm']});
+        }
+        return true;
+
+      case ActionType.toggleButton:
+        button.toggleState = !button.toggleState;
+        notifyListeners();
+        final stateKey = button.toggleState ? 'on_action' : 'off_action';
+        final subAction = button.actionPayload[stateKey];
+        _log('Toggled "${button.title}" -> ${button.toggleState ? "ON" : "OFF"}');
+        if (subAction is Map<String, dynamic>) {
+          final act = subAction['action']?.toString() ?? 'hotkey';
+          final payload = subAction['payload'] as Map<String, dynamic>? ?? {};
+          _connectionService.sendAction(act, payload);
+        } else if (subAction is Map) {
+          final act = subAction['action']?.toString() ?? 'hotkey';
+          final payload = Map<String, dynamic>.from(subAction['payload'] as Map? ?? {});
+          _connectionService.sendAction(act, payload);
+        }
+        return true;
+
+      case ActionType.folderAction:
+        _log('Navigated to folder "${button.title}"');
         return true;
 
       case ActionType.dynamicFunction:

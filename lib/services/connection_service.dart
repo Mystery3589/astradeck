@@ -59,6 +59,9 @@ class ConnectionService extends ChangeNotifier {
   /// Called when the server pushes a system_state message with current volume/brightness.
   void Function(double? volume, double? brightness)? onSystemState;
 
+  /// Called when the server pushes a state_update broadcast with full snapshot.
+  void Function(Map<String, dynamic> states)? onStateUpdate;
+
   // --- Bluetooth Platform Channel Fields ---
   static const _btMethod = MethodChannel('com.astradeck/bluetooth');
   static const _btEvents = EventChannel('com.astradeck/bluetooth_events');
@@ -245,6 +248,11 @@ class ConnectionService extends ChangeNotifier {
                   final vol = (json['volume'] as num?)?.toDouble();
                   final brightness = (json['brightness'] as num?)?.toDouble();
                   onSystemState?.call(vol, brightness);
+                } else if (json['type'] == 'state_update') {
+                  final states = json['states'];
+                  if (states is Map<String, dynamic>) {
+                    onStateUpdate?.call(states);
+                  }
                 } else if (json['status'] == 'authenticated') {
                   _devices[idx].status = ConnectionStatus.connected;
                   _devices[idx].isTrusted = true;
@@ -890,6 +898,11 @@ class ConnectionService extends ChangeNotifier {
               final vol = (json['volume'] as num?)?.toDouble();
               final brightness = (json['brightness'] as num?)?.toDouble();
               onSystemState?.call(vol, brightness);
+            } else if (json['type'] == 'state_update') {
+              final states = json['states'];
+              if (states is Map<String, dynamic>) {
+                onStateUpdate?.call(states);
+              }
             } else if (json['status'] == 'authenticated') {
               _devices[currentIdx].status = ConnectionStatus.connected;
               _devices[currentIdx].isTrusted = true;
@@ -1273,6 +1286,11 @@ class ConnectionService extends ChangeNotifier {
                 final vol = (json['volume'] as num?)?.toDouble();
                 final brightness = (json['brightness'] as num?)?.toDouble();
                 onSystemState?.call(vol, brightness);
+              } else if (json['type'] == 'state_update') {
+                final states = json['states'];
+                if (states is Map<String, dynamic>) {
+                  onStateUpdate?.call(states);
+                }
               }
             }
           }

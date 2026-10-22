@@ -99,6 +99,16 @@ class ProfileService extends ChangeNotifier {
     }
   }
 
+  void renamePage(int pageIndex, String newName) {
+    final profileIndex = _profiles.indexWhere((p) => p.id == _activeProfileId);
+    if (profileIndex != -1 && pageIndex >= 0 && pageIndex < _profiles[profileIndex].pages.length) {
+      _saveSnapshot();
+      _profiles[profileIndex].pages[pageIndex].name = newName.trim().isEmpty ? 'Page ${pageIndex + 1}' : newName.trim();
+      _storage.saveProfiles(_profiles);
+      notifyListeners();
+    }
+  }
+
   void deletePage(int pageIndex) {
     final profileIndex = _profiles.indexWhere((p) => p.id == _activeProfileId);
     if (profileIndex != -1 && _profiles[profileIndex].pages.length > 1) {
@@ -243,13 +253,48 @@ class ProfileService extends ChangeNotifier {
   }
 
   void renameProfile(String profileId, String newName, String newDesc) {
+    updateProfileMetadata(profileId, name: newName, description: newDesc);
+  }
+
+  void updateProfileMetadata(
+    String profileId, {
+    String? name,
+    String? description,
+    int? rows,
+    int? cols,
+    String? autoSwitchWindowTitle,
+    int? defaultPageIndex,
+    Map<String, dynamic>? appearanceConfig,
+  }) {
     final index = _profiles.indexWhere((p) => p.id == profileId);
     if (index != -1) {
-      _profiles[index].name = newName;
-      _profiles[index].description = newDesc;
+      _saveSnapshot();
+      final p = _profiles[index];
+      _profiles[index] = p.copyWith(
+        name: name,
+        description: description,
+        gridRows: rows,
+        gridCols: cols,
+        autoSwitchWindowTitle: autoSwitchWindowTitle,
+        defaultPageIndex: defaultPageIndex,
+        appearanceConfig: appearanceConfig,
+      );
       _storage.saveProfiles(_profiles);
       notifyListeners();
     }
+  }
+
+  void reorderProfiles(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= _profiles.length) return;
+    if (newIndex < 0 || newIndex > _profiles.length) return;
+    _saveSnapshot();
+    if (oldIndex < newIndex) {
+      newIndex -= 1;
+    }
+    final item = _profiles.removeAt(oldIndex);
+    _profiles.insert(newIndex, item);
+    _storage.saveProfiles(_profiles);
+    notifyListeners();
   }
 
   void deleteProfile(String profileId) {

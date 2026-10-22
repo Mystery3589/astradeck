@@ -9,6 +9,7 @@ import 'services/settings_service.dart';
 import 'services/connection_service.dart';
 import 'services/deck_execution_service.dart';
 import 'services/profile_service.dart';
+import 'services/live_state_service.dart';
 import 'theme/astradeck_theme.dart';
 
 void main() async {
@@ -29,11 +30,17 @@ class AstraDeckApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => SettingsService(storageService)),
         ChangeNotifierProvider(create: (_) => ConnectionService(storageService)),
-        ChangeNotifierProxyProvider<ConnectionService, DeckExecutionService>(
-          create: (ctx) => DeckExecutionService(ctx.read<ConnectionService>()),
-          update: (ctx, conn, prev) => prev ?? DeckExecutionService(conn),
-        ),
+        ChangeNotifierProvider(create: (_) => LiveStateService()),
         ChangeNotifierProvider(create: (_) => ProfileService(storageService)),
+        ChangeNotifierProxyProvider3<ConnectionService, LiveStateService, ProfileService, DeckExecutionService>(
+          create: (ctx) => DeckExecutionService(
+            ctx.read<ConnectionService>(),
+            ctx.read<LiveStateService>(),
+            ctx.read<ProfileService>(),
+          ),
+          update: (ctx, conn, liveState, profiles, prev) =>
+              prev ?? DeckExecutionService(conn, liveState, profiles),
+        ),
       ],
       child: Consumer<SettingsService>(
         builder: (context, settingsService, _) {
@@ -42,8 +49,16 @@ class AstraDeckApp extends StatelessWidget {
             title: 'AstraDeck',
             debugShowCheckedModeBanner: false,
             themeMode: settings.themeMode,
-            theme: AstraDeckTheme.getLightTheme(settings.accentColor),
-            darkTheme: AstraDeckTheme.getDarkTheme(settings.accentColor),
+            theme: AstraDeckTheme.getTheme(
+              preset: settings.themePreset,
+              accentOverride: settings.accentColor,
+              mode: ThemeMode.light,
+            ),
+            darkTheme: AstraDeckTheme.getTheme(
+              preset: settings.themePreset,
+              accentOverride: settings.accentColor,
+              mode: ThemeMode.dark,
+            ),
             home: const MainNavigationShell(),
           );
         },
@@ -71,40 +86,67 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
 
   @override
   Widget build(BuildContext context) {
+    final themeBundle = AstraThemeBundle.of(context);
+    final theme = Theme.of(context);
+
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
         children: _destinations,
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (idx) {
-          setState(() {
-            _currentIndex = idx;
-          });
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.dashboard_outlined),
-            selectedIcon: Icon(Icons.dashboard),
-            label: 'Deck',
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: themeBundle.navBarBg,
+          border: Border(
+            top: BorderSide(
+              color: themeBundle.borderColor.withValues(alpha: 0.5),
+              width: 1,
+            ),
           ),
-          NavigationDestination(
-            icon: Icon(Icons.layers_outlined),
-            selectedIcon: Icon(Icons.layers),
-            label: 'Profiles',
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.25),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          top: false,
+          child: NavigationBar(
+            elevation: 0,
+            backgroundColor: Colors.transparent,
+            selectedIndex: _currentIndex,
+            indicatorColor: theme.colorScheme.primary.withValues(alpha: themeBundle.isDark ? 0.22 : 0.15),
+            onDestinationSelected: (idx) {
+              setState(() {
+                _currentIndex = idx;
+              });
+            },
+            destinations: const [
+              NavigationDestination(
+                icon: Icon(Icons.dashboard_outlined),
+                selectedIcon: Icon(Icons.dashboard_rounded),
+                label: 'Deck',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.layers_outlined),
+                selectedIcon: Icon(Icons.layers_rounded),
+                label: 'Profiles',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.wifi_tethering_outlined),
+                selectedIcon: Icon(Icons.wifi_tethering_rounded),
+                label: 'Connections',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.settings_outlined),
+                selectedIcon: Icon(Icons.settings_rounded),
+                label: 'Settings',
+              ),
+            ],
           ),
-          NavigationDestination(
-            icon: Icon(Icons.wifi_tethering),
-            selectedIcon: Icon(Icons.wifi_tethering_rounded),
-            label: 'Connections',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
-            label: 'Settings',
-          ),
-        ],
+        ),
       ),
     );
   }

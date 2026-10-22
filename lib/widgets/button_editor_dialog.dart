@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/deck_models.dart';
+import '../theme/astradeck_theme.dart';
 import '../utils/icon_helper.dart';
 
 class ButtonEditorDialog extends StatefulWidget {
@@ -34,6 +35,7 @@ class _ButtonEditorDialogState extends State<ButtonEditorDialog> {
   late bool _requiresConfirmation;
   late bool _hapticFeedback;
   late bool _isEnabled;
+  String? _liveStatePath;
 
   final List<int> _presetColors = [
     0xFF1E293B, // Slate
@@ -54,14 +56,22 @@ class _ButtonEditorDialogState extends State<ButtonEditorDialog> {
     _subtitleController = TextEditingController(text: widget.button.subtitle);
 
     String defaultPayload = '';
-    if (widget.button.actionPayload.containsKey('url')) {
-      defaultPayload = widget.button.actionPayload['url'] ?? '';
-    } else if (widget.button.actionPayload.containsKey('app')) {
-      defaultPayload = widget.button.actionPayload['app'] ?? '';
-    } else if (widget.button.actionPayload.containsKey('definition')) {
-      defaultPayload = widget.button.actionPayload['definition'] ?? '';
-    } else if (widget.button.actionPayload.containsKey('command')) {
-      defaultPayload = widget.button.actionPayload['command'] ?? '';
+    final p = widget.button.actionPayload;
+    if (p.containsKey('url')) {
+      defaultPayload = p['url'] ?? '';
+    } else if (p.containsKey('app')) {
+      defaultPayload = p['app'] ?? '';
+    } else if (p.containsKey('definition')) {
+      defaultPayload = p['definition'] ?? '';
+    } else if (p.containsKey('command')) {
+      defaultPayload = p['command'] ?? '';
+    } else if (p.containsKey('keys')) {
+      final keys = p['keys'];
+      defaultPayload = keys is List ? keys.join('+') : keys.toString();
+    } else if (p.containsKey('combo')) {
+      defaultPayload = p['combo'] ?? '';
+    } else if (p.containsKey('text')) {
+      defaultPayload = p['text'] ?? '';
     }
     _payloadController = TextEditingController(text: defaultPayload);
 
@@ -74,6 +84,7 @@ class _ButtonEditorDialogState extends State<ButtonEditorDialog> {
     _requiresConfirmation = widget.button.requiresConfirmation;
     _hapticFeedback = widget.button.hapticFeedback;
     _isEnabled = widget.button.isEnabled;
+    _liveStatePath = widget.button.liveStatePath;
   }
 
   @override
@@ -85,26 +96,37 @@ class _ButtonEditorDialogState extends State<ButtonEditorDialog> {
   }
 
   void _save() {
-    Map<String, dynamic> payload = {};
+    Map<String, dynamic> payload = Map<String, dynamic>.from(widget.button.actionPayload);
+    final text = _payloadController.text.trim();
+
     if (_actionType == ActionType.openWebsite) {
-      payload['url'] = _payloadController.text.trim();
+      payload['url'] = text;
     } else if (_actionType == ActionType.launchApp) {
-      payload['app'] = _payloadController.text.trim();
+      payload['app'] = text;
+    } else if (_actionType == ActionType.injectHotkey) {
+      final cleanCombo = text.replaceAll(' ', '');
+      payload['combo'] = cleanCombo;
+      payload['keys'] = cleanCombo.split('+').where((k) => k.isNotEmpty).toList();
+    } else if (_actionType == ActionType.pasteText) {
+      payload['text'] = _payloadController.text;
+    } else if (_actionType == ActionType.mediaControl) {
+      payload['command'] = text.isEmpty ? 'play_pause' : text;
+    } else if (_actionType == ActionType.spotifyAction) {
+      payload['command'] = text.isEmpty ? 'play_pause' : text;
+    } else if (_actionType == ActionType.discordAction) {
+      payload['command'] = text.isEmpty ? 'toggle_mute' : text;
     } else if (_actionType == ActionType.dynamicFunction) {
-      final text = _payloadController.text.trim();
       payload['definition'] = text;
       payload['command'] = text;
       if (widget.button.actionPayload.containsKey('function_id')) {
         payload['function_id'] = widget.button.actionPayload['function_id'];
       }
     } else if (_actionType == ActionType.obsAction) {
-      payload['command'] = _payloadController.text.trim().isNotEmpty
-          ? _payloadController.text.trim()
-          : 'toggle_record';
+      payload['command'] = text.isNotEmpty ? text : 'toggle_record';
     } else if (_actionType == ActionType.setVolume) {
-      payload['step'] = double.tryParse(_payloadController.text) ?? 5.0;
+      payload['step'] = double.tryParse(text) ?? 5.0;
     } else if (_actionType == ActionType.setBrightness) {
-      payload['step'] = double.tryParse(_payloadController.text) ?? 10.0;
+      payload['step'] = double.tryParse(text) ?? 10.0;
     }
 
     final updated = widget.button.copyWith(
@@ -120,6 +142,7 @@ class _ButtonEditorDialogState extends State<ButtonEditorDialog> {
       requiresConfirmation: _requiresConfirmation,
       hapticFeedback: _hapticFeedback,
       isEnabled: _isEnabled,
+      liveStatePath: _liveStatePath,
     );
     widget.onSave(updated);
     Navigator.of(context).pop();
@@ -227,6 +250,66 @@ class _ButtonEditorDialogState extends State<ButtonEditorDialog> {
                     ),
                     onChanged: (_) => setState(() {}),
                   ),
+                  const SizedBox(height: 12),
+
+                  // Live Data Feed Dropdown
+                  DropdownButtonFormField<String?>(
+                    initialValue: _liveStatePath,
+                    dropdownColor: const Color(0xFF1E293B),
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: 'Live Dynamic Value (Feed)',
+                      labelStyle: TextStyle(color: Color(0xFF94A3B8)),
+                      filled: true,
+                      fillColor: Color(0xFF0F172A),
+                      border: OutlineInputBorder(),
+                      helperText: 'Dynamically shows PC metrics or current track title',
+                      helperStyle: TextStyle(color: Color(0xFF64748B), fontSize: 11),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: null,
+                        child: Text('None (Static Subtitle)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'system.cpu_percent',
+                        child: Text('💻 CPU Usage %'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'system.ram_percent',
+                        child: Text('🧠 RAM Usage %'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'media.title',
+                        child: Text('🎵 Media Track Title'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'media.artist',
+                        child: Text('🎤 Media Artist'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'spotify.track',
+                        child: Text('🟢 Spotify Track'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'window.title',
+                        child: Text('🪟 Active Window Title'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'obs.recording',
+                        child: Text('🔴 OBS Recording Status'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'obs.streaming',
+                        child: Text('📡 OBS Streaming Status'),
+                      ),
+                    ],
+                    onChanged: (val) {
+                      setState(() {
+                        _liveStatePath = val;
+                      });
+                    },
+                  ),
                   const SizedBox(height: 16),
 
                   // Action Type Dropdown
@@ -241,9 +324,7 @@ class _ButtonEditorDialogState extends State<ButtonEditorDialog> {
                       fillColor: Color(0xFF0F172A),
                       border: OutlineInputBorder(),
                     ),
-                    items: ActionType.values
-                        .where((type) => type != ActionType.obsAction)
-                        .map((type) {
+                    items: ActionType.values.map((type) {
                       return DropdownMenuItem(
                         value: type,
                         child: Text(type.displayName),
@@ -293,6 +374,78 @@ class _ButtonEditorDialogState extends State<ButtonEditorDialog> {
                         _buildQuickActionChip('Switch Audio', 'switch audio output', 'headset'),
                         _buildQuickActionChip('Open Terminal', 'open terminal', 'terminal'),
                         _buildQuickActionChip('Empty Trash', 'empty trash and clean cache', 'delete'),
+                      ],
+                    ),
+                  ] else if (_actionType == ActionType.injectHotkey) ...[
+                    const SizedBox(height: 8),
+                    const Text('Quick Shortcuts:', style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _buildQuickActionChip('Copy', 'ctrl+c', 'content_copy'),
+                        _buildQuickActionChip('Paste', 'ctrl+v', 'content_paste'),
+                        _buildQuickActionChip('Undo', 'ctrl+z', 'undo'),
+                        _buildQuickActionChip('Save', 'ctrl+s', 'save'),
+                        _buildQuickActionChip('Task Mgr', 'ctrl+shift+escape', 'tune'),
+                        _buildQuickActionChip('Alt+Tab', 'alt+tab', 'swap_horiz'),
+                        _buildQuickActionChip('Show Desktop', 'super+d', 'desktop_windows'),
+                        _buildQuickActionChip('Fullscreen', 'f11', 'fullscreen'),
+                      ],
+                    ),
+                  ] else if (_actionType == ActionType.mediaControl) ...[
+                    const SizedBox(height: 8),
+                    const Text('Playback Commands:', style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _buildQuickActionChip('Play / Pause', 'play_pause', 'play_arrow'),
+                        _buildQuickActionChip('Next Track', 'next', 'skip_next'),
+                        _buildQuickActionChip('Prev Track', 'previous', 'skip_previous'),
+                        _buildQuickActionChip('Stop', 'stop', 'stop'),
+                      ],
+                    ),
+                  ] else if (_actionType == ActionType.spotifyAction) ...[
+                    const SizedBox(height: 8),
+                    const Text('Spotify Commands (Free & Premium):', style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _buildQuickActionChip('Play / Pause', 'play_pause', 'music_note'),
+                        _buildQuickActionChip('Next Track', 'next', 'skip_next'),
+                        _buildQuickActionChip('Prev Track', 'previous', 'skip_previous'),
+                      ],
+                    ),
+                  ] else if (_actionType == ActionType.discordAction) ...[
+                    const SizedBox(height: 8),
+                    const Text('Discord Commands:', style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _buildQuickActionChip('Mute Mic', 'toggle_mute', 'mic_off'),
+                        _buildQuickActionChip('Deafen', 'toggle_deafen', 'headset_off'),
+                      ],
+                    ),
+                  ] else if (_actionType == ActionType.obsAction) ...[
+                    const SizedBox(height: 8),
+                    const Text('OBS Studio Commands:', style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _buildQuickActionChip('Toggle Record', 'toggle_recording', 'videocam'),
+                        _buildQuickActionChip('Toggle Stream', 'toggle_streaming', 'live_tv'),
+                        _buildQuickActionChip('Virtual Cam', 'toggle_virtual_cam', 'switch_video'),
+                        _buildQuickActionChip('Toggle Mic', 'toggle_mute', 'mic'),
+                        _buildQuickActionChip('Save Replay', 'save_replay_buffer', 'history'),
                       ],
                     ),
                   ],
@@ -442,14 +595,16 @@ class _ButtonEditorDialogState extends State<ButtonEditorDialog> {
   }
 
   Widget _buildQuickActionChip(String label, String actionDef, String icon) {
+    final themeBundle = AstraThemeBundle.of(context);
     return ActionChip(
-      label: Text(label, style: const TextStyle(fontSize: 11, color: Colors.white)),
-      backgroundColor: const Color(0xFF334155),
+      label: Text(label, style: TextStyle(fontSize: 11, color: themeBundle.textPrimary)),
+      backgroundColor: themeBundle.surfaceElevated,
+      side: BorderSide(color: themeBundle.borderColor),
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       onPressed: () {
         setState(() {
           _payloadController.text = actionDef;
-          if (_titleController.text.isEmpty || _titleController.text == 'Action Button') {
+          if (_titleController.text.isEmpty || _titleController.text == 'Action Button' || _titleController.text == 'New Action') {
             _titleController.text = label;
           }
           _iconName = icon;
@@ -472,6 +627,20 @@ class _ButtonEditorDialogState extends State<ButtonEditorDialog> {
         return 'Volume Delta (+/- 5, 10)';
       case ActionType.setBrightness:
         return 'Brightness Delta (+/- 10)';
+      case ActionType.injectHotkey:
+        return 'Hotkey Combo (e.g. ctrl+shift+z, alt+tab, f11)';
+      case ActionType.pasteText:
+        return 'Text to Paste / Type';
+      case ActionType.mediaControl:
+        return 'Media Command (play_pause, next, previous, stop)';
+      case ActionType.spotifyAction:
+        return 'Spotify Command (play_pause, next, previous)';
+      case ActionType.discordAction:
+        return 'Discord Action (toggle_mute, toggle_deafen)';
+      case ActionType.toggleButton:
+        return 'Toggle Configuration (JSON or state identifier)';
+      case ActionType.folderAction:
+        return 'Folder / Target Page Name';
       default:
         return 'Action Parameter';
     }
@@ -480,11 +649,27 @@ class _ButtonEditorDialogState extends State<ButtonEditorDialog> {
   String _getPayloadHelper() {
     switch (_actionType) {
       case ActionType.launchApp:
-        return 'Opens native app (if open, nothing happens); opens in browser if not installed.';
+        return 'Opens native app (if open, focuses); opens in browser if not installed.';
       case ActionType.openWebsite:
         return 'Opens in default browser (reopens every time clicked).';
       case ActionType.dynamicFunction:
         return 'AstraDeck dynamically creates and executes a function on PC for this action.';
+      case ActionType.injectHotkey:
+        return 'Simulates physical key combination on PC (works across Linux X11/Wayland, macOS, Windows).';
+      case ActionType.pasteText:
+        return 'Types this text directly into whatever window is focused on your desktop.';
+      case ActionType.mediaControl:
+        return 'Native OS media control. Controls Spotify, browsers, VLC with zero setup or API keys.';
+      case ActionType.spotifyAction:
+        return 'OS-level Spotify integration via MPRIS / AppleScript. Works with Free or Premium without tokens.';
+      case ActionType.discordAction:
+        return 'Triggers Discord mute or deafen shortcut.';
+      case ActionType.toggleButton:
+        return 'Switches between two states on every tap with real-time visual indicator.';
+      case ActionType.obsAction:
+        return 'Controls OBS Studio via WebSocket (recording, streaming, scene switching, virtual camera).';
+      case ActionType.folderAction:
+        return 'Switches to the designated page or folder.';
       default:
         return 'Validated execution parameter';
     }

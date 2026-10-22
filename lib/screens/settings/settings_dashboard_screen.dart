@@ -5,6 +5,7 @@ import '../../services/connection_service.dart';
 import '../../services/settings_service.dart';
 import '../../services/profile_service.dart';
 import '../../services/deck_execution_service.dart';
+import '../../theme/astradeck_theme.dart';
 
 class SettingsDashboardScreen extends StatefulWidget {
   const SettingsDashboardScreen({super.key});
@@ -342,6 +343,8 @@ class _SettingsDashboardScreenState extends State<SettingsDashboardScreen> {
   // 3. Deck Appearance
   Widget _buildAppearanceSettings(BuildContext context, SettingsService settings) {
     final s = settings.settings;
+    final theme = Theme.of(context);
+    final themeBundle = AstraThemeBundle.of(context);
 
     final accentColors = [
       const Color(0xFF6366F1), // Indigo
@@ -351,30 +354,52 @@ class _SettingsDashboardScreenState extends State<SettingsDashboardScreen> {
       const Color(0xFFEC4899), // Pink
       const Color(0xFF8B5CF6), // Purple
       const Color(0xFFEF4444), // Red
+      const Color(0xFF00E5FF), // Electric Cyan
+      const Color(0xFFFF007F), // Neon Magenta
+      const Color(0xFF88C0D0), // Frost Blue
     ];
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Deck Appearance')),
+      backgroundColor: themeBundle.scaffoldBg,
+      appBar: AppBar(
+        title: Text('Deck Appearance & Themes', style: TextStyle(color: themeBundle.textPrimary, fontWeight: FontWeight.bold)),
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Live Preview Box
+          // Live Preview Card
           Center(
             child: Container(
-              width: 140,
-              height: 100,
+              width: 150,
+              height: 106,
               decoration: BoxDecoration(
-                color: const Color(0xFF1E293B),
+                color: themeBundle.cardBg,
                 borderRadius: BorderRadius.circular(s.buttonCornerRadius),
                 border: Border.all(color: s.accentColor, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: s.accentColor.withValues(alpha: 0.25),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.star, color: s.accentColor, size: 32),
+                  Icon(Icons.dashboard_customize_rounded, color: s.accentColor, size: 34),
                   if (s.showButtonLabels && !s.iconOnlyMode) ...[
                     const SizedBox(height: 6),
-                    const Text('Live Preview', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                    Text(
+                      s.themePreset.displayName,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                        color: themeBundle.textPrimary,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ],
                 ],
               ),
@@ -382,87 +407,279 @@ class _SettingsDashboardScreenState extends State<SettingsDashboardScreen> {
           ),
           const SizedBox(height: 24),
 
-          // Theme Mode
-          ListTile(
-            title: const Text('Theme Mode'),
-            subtitle: Text(s.themeMode.name.toUpperCase()),
-            trailing: DropdownButton<ThemeMode>(
-              value: s.themeMode,
-              dropdownColor: const Color(0xFF1E293B),
-              items: const [
-                DropdownMenuItem(value: ThemeMode.dark, child: Text('Dark')),
-                DropdownMenuItem(value: ThemeMode.light, child: Text('Light')),
-                DropdownMenuItem(value: ThemeMode.system, child: Text('System')),
-              ],
-              onChanged: (v) => settings.updateSettings(themeMode: v!),
+          // Theme Gallery Header
+          Text(
+            'THEME GALLERY',
+            style: TextStyle(
+              color: themeBundle.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.8,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
 
-          // Accent Color
-          const Text('Accent Color', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 12,
-            children: accentColors.map((color) {
-              final isSel = s.accentColor == color;
-              return InkWell(
-                onTap: () => settings.updateSettings(accentColor: color),
-                borderRadius: BorderRadius.circular(24),
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: color,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: isSel ? Colors.white : Colors.transparent, width: 3),
+          // Horizontal Theme Carousel
+          SizedBox(
+            height: 140,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: AstraThemePreset.values.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 12),
+              itemBuilder: (context, idx) {
+                final preset = AstraThemePreset.values[idx];
+                final bundle = preset.bundle;
+                final isSelected = s.themePreset == preset;
+
+                return InkWell(
+                  onTap: () {
+                    settings.updateSettings(
+                      themePreset: preset,
+                      accentColor: bundle.defaultAccent,
+                    );
+                  },
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    width: 140,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: bundle.cardBg,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isSelected ? theme.colorScheme.primary : bundle.borderColor,
+                        width: isSelected ? 2.5 : 1,
+                      ),
+                      boxShadow: [
+                        if (isSelected)
+                          BoxShadow(
+                            color: theme.colorScheme.primary.withValues(alpha: 0.3),
+                            blurRadius: 10,
+                            offset: const Offset(0, 3),
+                          ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Swatch Preview
+                        Row(
+                          children: [
+                            Container(
+                              width: 22,
+                              height: 22,
+                              decoration: BoxDecoration(
+                                color: bundle.scaffoldBg,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: bundle.borderColor),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Container(
+                              width: 22,
+                              height: 22,
+                              decoration: BoxDecoration(
+                                color: bundle.defaultAccent,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const Spacer(),
+                            if (isSelected)
+                              Icon(Icons.check_circle_rounded, color: theme.colorScheme.primary, size: 20),
+                          ],
+                        ),
+                        const Spacer(),
+                        Text(
+                          preset.displayName,
+                          style: TextStyle(
+                            color: bundle.textPrimary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          bundle.isDark ? 'Dark Mode' : 'Light Mode',
+                          style: TextStyle(
+                            color: bundle.textSecondary,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              );
-            }).toList(),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Theme Mode Switcher
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            decoration: BoxDecoration(
+              color: themeBundle.surfaceElevated,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: themeBundle.borderColor),
+            ),
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.brightness_6_rounded, color: theme.colorScheme.primary),
+              title: Text('Theme Mode', style: TextStyle(color: themeBundle.textPrimary, fontWeight: FontWeight.w600)),
+              subtitle: Text(s.themeMode.name.toUpperCase(), style: TextStyle(color: themeBundle.textSecondary, fontSize: 12)),
+              trailing: DropdownButton<ThemeMode>(
+                value: s.themeMode,
+                dropdownColor: themeBundle.cardBg,
+                items: [
+                  DropdownMenuItem(value: ThemeMode.dark, child: Text('Dark', style: TextStyle(color: themeBundle.textPrimary))),
+                  DropdownMenuItem(value: ThemeMode.light, child: Text('Light', style: TextStyle(color: themeBundle.textPrimary))),
+                  DropdownMenuItem(value: ThemeMode.system, child: Text('System', style: TextStyle(color: themeBundle.textPrimary))),
+                ],
+                onChanged: (v) => settings.updateSettings(themeMode: v!),
+              ),
+            ),
           ),
           const SizedBox(height: 20),
 
-          // Corner Radius Slider
-          ListTile(
-            title: const Text('Button Corner Radius'),
-            subtitle: Text('${s.buttonCornerRadius.round()} px'),
+          // Accent Color Palette
+          Text(
+            'CUSTOM ACCENT COLOR',
+            style: TextStyle(
+              color: themeBundle.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.8,
+            ),
           ),
-          Slider(
-            value: s.buttonCornerRadius,
-            min: 4,
-            max: 32,
-            activeColor: s.accentColor,
-            onChanged: (v) => settings.updateSettings(buttonCornerRadius: v),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: themeBundle.surfaceElevated,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: themeBundle.borderColor),
+            ),
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 10,
+              children: accentColors.map((color) {
+                final isSel = s.accentColor.toARGB32() == color.toARGB32();
+                return InkWell(
+                  onTap: () => settings.updateSettings(accentColor: color),
+                  borderRadius: BorderRadius.circular(24),
+                  child: Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isSel ? Colors.white : Colors.transparent,
+                        width: 3,
+                      ),
+                      boxShadow: [
+                        if (isSel)
+                          BoxShadow(
+                            color: color.withValues(alpha: 0.5),
+                            blurRadius: 8,
+                            spreadRadius: 1,
+                          ),
+                      ],
+                    ),
+                    child: isSel ? const Icon(Icons.check, size: 18, color: Colors.white) : null,
+                  ),
+                );
+              }).toList(),
+            ),
           ),
+          const SizedBox(height: 24),
 
-          // Spacing Slider
-          ListTile(
-            title: const Text('Grid Spacing'),
-            subtitle: Text('${s.buttonSpacing.round()} px'),
+          // Grid & Button Styling Sliders
+          Text(
+            'BUTTON GEOMETRY & SPACING',
+            style: TextStyle(
+              color: themeBundle.textSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.8,
+            ),
           ),
-          Slider(
-            value: s.buttonSpacing,
-            min: 6,
-            max: 24,
-            activeColor: s.accentColor,
-            onChanged: (v) => settings.updateSettings(buttonSpacing: v),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: themeBundle.surfaceElevated,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: themeBundle.borderColor),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Corner Radius', style: TextStyle(color: themeBundle.textPrimary, fontWeight: FontWeight.w600)),
+                    Text('${s.buttonCornerRadius.round()} px', style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                Slider(
+                  value: s.buttonCornerRadius,
+                  min: 4,
+                  max: 32,
+                  activeColor: s.accentColor,
+                  onChanged: (v) => settings.updateSettings(buttonCornerRadius: v),
+                ),
+                const Divider(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Button Spacing', style: TextStyle(color: themeBundle.textPrimary, fontWeight: FontWeight.w600)),
+                    Text('${s.buttonSpacing.round()} px', style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                Slider(
+                  value: s.buttonSpacing,
+                  min: 6,
+                  max: 24,
+                  activeColor: s.accentColor,
+                  onChanged: (v) => settings.updateSettings(buttonSpacing: v),
+                ),
+              ],
+            ),
           ),
+          const SizedBox(height: 20),
 
-          SwitchListTile(
-            title: const Text('Show Button Labels'),
-            value: s.showButtonLabels,
-            onChanged: (v) => settings.updateSettings(showButtonLabels: v),
-          ),
-          SwitchListTile(
-            title: const Text('Icon-Only Mode'),
-            value: s.iconOnlyMode,
-            onChanged: (v) => settings.updateSettings(iconOnlyMode: v),
-          ),
-          SwitchListTile(
-            title: const Text('Haptic Vibration Feedback'),
-            value: s.hapticFeedbackEnabled,
-            onChanged: (v) => settings.updateSettings(hapticFeedbackEnabled: v),
+          // Display Toggles
+          Container(
+            decoration: BoxDecoration(
+              color: themeBundle.surfaceElevated,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: themeBundle.borderColor),
+            ),
+            child: Column(
+              children: [
+                SwitchListTile(
+                  title: Text('Show Button Labels', style: TextStyle(color: themeBundle.textPrimary, fontWeight: FontWeight.w600)),
+                  subtitle: Text('Display text under icons', style: TextStyle(color: themeBundle.textSecondary, fontSize: 12)),
+                  value: s.showButtonLabels,
+                  onChanged: (v) => settings.updateSettings(showButtonLabels: v),
+                ),
+                const Divider(height: 1),
+                SwitchListTile(
+                  title: Text('Icon-Only Mode', style: TextStyle(color: themeBundle.textPrimary, fontWeight: FontWeight.w600)),
+                  subtitle: Text('Hide labels and expand action icons', style: TextStyle(color: themeBundle.textSecondary, fontSize: 12)),
+                  value: s.iconOnlyMode,
+                  onChanged: (v) => settings.updateSettings(iconOnlyMode: v),
+                ),
+                const Divider(height: 1),
+                SwitchListTile(
+                  title: Text('Haptic Vibration Feedback', style: TextStyle(color: themeBundle.textPrimary, fontWeight: FontWeight.w600)),
+                  subtitle: Text('Vibrate on button taps', style: TextStyle(color: themeBundle.textSecondary, fontSize: 12)),
+                  value: s.hapticFeedbackEnabled,
+                  onChanged: (v) => settings.updateSettings(hapticFeedbackEnabled: v),
+                ),
+              ],
+            ),
           ),
         ],
       ),

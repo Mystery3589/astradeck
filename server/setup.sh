@@ -115,12 +115,61 @@ if [ -n "$CURRENT_SCRIPT_DIR" ] && [ -f "$CURRENT_SCRIPT_DIR/astradeck_agent.py"
     cp -u "$CURRENT_SCRIPT_DIR/app_lifecycle.py" "$INSTALL_DIR/" 2>/dev/null || cp "$CURRENT_SCRIPT_DIR/app_lifecycle.py" "$INSTALL_DIR/"
     cp -u "$CURRENT_SCRIPT_DIR/system_controls.py" "$INSTALL_DIR/" 2>/dev/null || cp "$CURRENT_SCRIPT_DIR/system_controls.py" "$INSTALL_DIR/"
     cp -u "$CURRENT_SCRIPT_DIR/dynamic_function_engine.py" "$INSTALL_DIR/" 2>/dev/null || cp "$CURRENT_SCRIPT_DIR/dynamic_function_engine.py" "$INSTALL_DIR/"
+    cp -u "$CURRENT_SCRIPT_DIR/hotkey_injector.py" "$INSTALL_DIR/" 2>/dev/null || cp "$CURRENT_SCRIPT_DIR/hotkey_injector.py" "$INSTALL_DIR/"
+    cp -u "$CURRENT_SCRIPT_DIR/media_controller.py" "$INSTALL_DIR/" 2>/dev/null || cp "$CURRENT_SCRIPT_DIR/media_controller.py" "$INSTALL_DIR/"
+    cp -u "$CURRENT_SCRIPT_DIR/state_broadcaster.py" "$INSTALL_DIR/" 2>/dev/null || cp "$CURRENT_SCRIPT_DIR/state_broadcaster.py" "$INSTALL_DIR/"
+    cp -u "$CURRENT_SCRIPT_DIR/spotify_integration.py" "$INSTALL_DIR/" 2>/dev/null || cp "$CURRENT_SCRIPT_DIR/spotify_integration.py" "$INSTALL_DIR/"
+    cp -u "$CURRENT_SCRIPT_DIR/obs_integration.py" "$INSTALL_DIR/" 2>/dev/null || cp "$CURRENT_SCRIPT_DIR/obs_integration.py" "$INSTALL_DIR/"
+    cp -u "$CURRENT_SCRIPT_DIR/discord_integration.py" "$INSTALL_DIR/" 2>/dev/null || cp "$CURRENT_SCRIPT_DIR/discord_integration.py" "$INSTALL_DIR/"
+    cp -u "$CURRENT_SCRIPT_DIR/rest_api.py" "$INSTALL_DIR/" 2>/dev/null || cp "$CURRENT_SCRIPT_DIR/rest_api.py" "$INSTALL_DIR/"
 else
     echo "[*] Fetching companion files from GitHub ($GITHUB_REPO)..."
     curl -sSL "$RAW_BASE/astradeck_agent.py" -o "$INSTALL_DIR/astradeck_agent.py"
     curl -sSL "$RAW_BASE/app_lifecycle.py" -o "$INSTALL_DIR/app_lifecycle.py"
     curl -sSL "$RAW_BASE/system_controls.py" -o "$INSTALL_DIR/system_controls.py"
     curl -sSL "$RAW_BASE/dynamic_function_engine.py" -o "$INSTALL_DIR/dynamic_function_engine.py"
+    curl -sSL "$RAW_BASE/hotkey_injector.py" -o "$INSTALL_DIR/hotkey_injector.py"
+    curl -sSL "$RAW_BASE/media_controller.py" -o "$INSTALL_DIR/media_controller.py"
+    curl -sSL "$RAW_BASE/state_broadcaster.py" -o "$INSTALL_DIR/state_broadcaster.py"
+    curl -sSL "$RAW_BASE/spotify_integration.py" -o "$INSTALL_DIR/spotify_integration.py"
+    curl -sSL "$RAW_BASE/obs_integration.py" -o "$INSTALL_DIR/obs_integration.py"
+    curl -sSL "$RAW_BASE/discord_integration.py" -o "$INSTALL_DIR/discord_integration.py"
+    curl -sSL "$RAW_BASE/rest_api.py" -o "$INSTALL_DIR/rest_api.py"
+fi
+
+# Auto-install desktop automation tools (playerctl, xdotool / ydotool / wtype)
+install_desktop_tools() {
+    echo "[*] Checking desktop automation tools (playerctl, xdotool/ydotool/wtype)..."
+    local NEED_TOOLS=()
+    if ! command -v playerctl &>/dev/null; then NEED_TOOLS+=("playerctl"); fi
+    if [ "$XDG_SESSION_TYPE" = "wayland" ]; then
+        if ! command -v ydotool &>/dev/null && ! command -v wtype &>/dev/null; then
+            NEED_TOOLS+=("ydotool" "wtype")
+        fi
+    else
+        if ! command -v xdotool &>/dev/null; then
+            NEED_TOOLS+=("xdotool")
+        fi
+    fi
+
+    if [ ${#NEED_TOOLS[@]} -eq 0 ]; then
+        echo "[✓] Desktop automation tools already installed."
+        return 0
+    fi
+
+    echo "[*] Installing missing desktop tools: ${NEED_TOOLS[*]}..."
+    if command -v apt-get &>/dev/null && sudo -n true 2>/dev/null; then
+        sudo apt-get update -qq && sudo apt-get install -y -qq "${NEED_TOOLS[@]}" 2>/dev/null || true
+    elif command -v pacman &>/dev/null && sudo -n true 2>/dev/null; then
+        sudo pacman -S --noconfirm "${NEED_TOOLS[@]}" 2>/dev/null || true
+    elif command -v dnf &>/dev/null && sudo -n true 2>/dev/null; then
+        sudo dnf install -y -q "${NEED_TOOLS[@]}" 2>/dev/null || true
+    elif command -v brew &>/dev/null; then
+        brew install "${NEED_TOOLS[@]}" 2>/dev/null || true
+    fi
+}
+if [ "$OS_TYPE" = "Linux" ]; then
+    install_desktop_tools
 fi
 
 # --- Android Debug Bridge (ADB) Auto-Setup ---
@@ -340,6 +389,8 @@ WorkingDirectory=$INSTALL_DIR
 ExecStart=$PYTHON_BIN $INSTALL_DIR/astradeck_agent.py
 Environment="PYTHONUNBUFFERED=1"
 Environment="PATH=/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PLATFORM_TOOLS_DIR:$PATH"
+Environment="DISPLAY=:0"
+PassEnvironment=DISPLAY WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR
 Restart=always
 RestartSec=3
 
@@ -348,6 +399,7 @@ WantedBy=default.target
 EOF
 
     systemctl --user daemon-reload
+    systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR 2>/dev/null || true
 
     if ! systemctl --user is-enabled --quiet astradeck.service 2>/dev/null; then
         systemctl --user enable astradeck.service

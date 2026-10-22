@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../models/desktop_device.dart';
 import '../../services/connection_service.dart';
 import '../../services/settings_service.dart';
+import '../../theme/astradeck_theme.dart';
 import '../../widgets/connect_pc_modal.dart';
 
 class ConnectionsScreen extends StatefulWidget {
@@ -31,8 +32,10 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> with SingleTicker
   Widget build(BuildContext context) {
     final connectionService = context.watch<ConnectionService>();
     final settingsService = context.watch<SettingsService>();
+    final themeBundle = AstraThemeBundle.of(context);
 
     return Scaffold(
+      backgroundColor: themeBundle.scaffoldBg,
       appBar: AppBar(
         title: const Text('Connection Manager'),
         bottom: TabBar(
